@@ -36,9 +36,13 @@ class AuthMiddleware(BaseHTTPMiddleware):
 
         # 检查是否提供了账户ID
         if not account_id:
-            return wrap_error_response(
-                code=401,
-                message="账户ID不存在，鉴权失败",
+            return JSONResponse(
+                content=wrap_error_response(
+                    code=401,
+                    message="账户ID不存在，鉴权失败",
+                ),
+                status_code=401,
+                media_type="application/json",
             )
 
         # request.state 可以理解成“本次请求专属的临时存储区”。

@@ -109,7 +109,8 @@ const fetchSSE = async (url: string, options: RequestInit) => {
       signal: options.signal,
     });
     afterFetchSession(response);
-    if (response.headers.get('Content-Type') === 'text/event-stream') {
+    const contentType = response.headers.get('Content-Type') || '';
+    if (contentType.includes('text/event-stream')) {
       // 只有真正拿到事件流时，才把 response.body 原样返回给上层逐段读取。
       if (!response.ok || !response.body) {
         const { error } = (await response.json().catch(() => ({ error: { message: '未知错误' } }))) || { error: { message: '未知错误' } };
@@ -119,6 +120,9 @@ const fetchSSE = async (url: string, options: RequestInit) => {
       return response.body
     }
     const data = await handleErrorResponse(response)
+    if (!response.ok) {
+      throw new Error(`HTTP错误: ${response.status}`);
+    }
     return data
   } catch (error) {
     console.log(error)

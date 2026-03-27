@@ -18,7 +18,13 @@ const target = url.resolve(process.env.CLOUD_AGENT_BASE_URL || "", 'api/v1/sessi
 // 这个 route 本身不直接创建云手机会话，
 // 它只是把浏览器请求转发给 Python agent 服务，顺便复用统一中间件处理鉴权和错误。
 const _post: ApiHandler = async (request: Request, middlewareResult) => {
-  const { thread_id, product_id, pod_id } = await request.json();
+  const body = await request.json();
+  // 前端表单层当前使用的是 camelCase，
+  // 而 Python 后端接口定义使用的是 snake_case。
+  // 这里做一次兼容转换，避免代理层把字段名“吃掉”。
+  const thread_id = body.thread_id ?? body.threadId;
+  const product_id = body.product_id ?? body.productId;
+  const pod_id = body.pod_id ?? body.podId;
   // withUserInfo: true 表示把中间件里解析出来的用户信息一并带给下游，
   // 这样后端可以把 accountId/userId/name 回写到响应里。
   const response = await fetchServer(

@@ -130,6 +130,12 @@ class CloudAgent {
       signal: this._abortController?.signal,
     });
 
+    // 当后端返回的是普通错误 JSON、空响应，或 fetchSSE 已经做过错误提示时，
+    // 这里不再继续把它当作 ReadableStream 使用，否则会触发 getReader 运行时异常。
+    if (!readable || typeof readable.getReader !== 'function') {
+      throw new Error('Agent 流式响应未建立成功');
+    }
+
     const reader = readable.getReader();
     const decoder = new TextDecoder();
 
