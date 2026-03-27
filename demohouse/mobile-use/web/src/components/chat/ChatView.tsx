@@ -31,7 +31,8 @@ const ChatView: React.FC<ChatViewProps> = ({
 }) => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // 自动滚动到最新消息
+  // 每次消息更新后都把视口滚到最底部，
+  // 这样用户不用手动拖动滚动条去追最新的执行步骤。
   const scrollToBottom = (): void => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
@@ -42,7 +43,7 @@ const ChatView: React.FC<ChatViewProps> = ({
 
   return (
     <div className="flex flex-col h-full">
-      {/* 聊天区域 */}
+      {/* 上半部分是可滚动消息区，下半部分是固定输入框。 */}
       <div
         className="flex-1 overflow-y-auto mb-6"
         style={{
@@ -71,7 +72,7 @@ const ChatView: React.FC<ChatViewProps> = ({
         <div ref={messagesEndRef} />
       </div>
 
-      {/* 输入区域 */}
+      {/* 输入区始终固定在底部，方便连续发起任务。 */}
       <InputArea
         handleSendMessage={handleSendMessage}
         handleCancel={handleCancel}

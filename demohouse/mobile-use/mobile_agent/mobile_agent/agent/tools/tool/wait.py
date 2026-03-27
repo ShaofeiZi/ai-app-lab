@@ -14,6 +14,13 @@ from mobile_agent.agent.tools.tool.abc import Tool
 
 
 class WaitTool(Tool):
+    """
+    这是一个本地等待工具。
+
+    有些页面变化不是立刻发生的，例如应用启动、网络刷新、动画结束。
+    模型在这种场景下可以主动调用 wait，让 agent 暂停几秒，再继续下一步操作。
+    """
+
     def __init__(self):
         super().__init__(
             name="wait",
@@ -27,5 +34,7 @@ class WaitTool(Tool):
         )
 
     async def handler(self, args: dict):
+        # 这里使用异步 sleep，而不是阻塞线程的 time.sleep，
+        # 这样在异步框架里等待时不会把整个事件循环卡死。
         await asyncio.sleep(args.get("t"))
         return f"已等待{args.get('t')}s"

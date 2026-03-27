@@ -12,12 +12,16 @@
 package config
 
 type MobileUseConfig struct {
+	// 这里用匿名嵌入把三个小结构拼成一个总配置，
+	// 调用方既可以整体传 MobileUseConfig，也可以直接通过字段名读取子配置。
 	AuthInfo
 	BizInfo
 	TosInfo
 }
 
 type AuthInfo struct {
+	// CurrentTime / ExpiredTime 主要用于临时凭证场景，
+	// AccessKeyId / SecretAccessKey / SessionToken 才是访问云接口的核心身份信息。
 	CurrentTime     string
 	ExpiredTime     string
 	AccessKeyId     string
@@ -26,12 +30,14 @@ type AuthInfo struct {
 }
 
 type BizInfo struct {
+	// 这些字段描述“要操作哪一台云手机”。
 	ACEPHost  string
 	ProductId string
 	DeviceId  string
 }
 
 type TosInfo struct {
+	// 截图会上传到 TOS，因此这里保存和对象存储相关的访问参数。
 	TosBucket       string
 	TosRegion       string
 	TosEndpoint     string

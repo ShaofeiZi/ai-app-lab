@@ -19,6 +19,8 @@ import (
 )
 
 func NewTakeScreenshotTool() mcp.Tool {
+	// 这里定义的是“工具的声明信息”，
+	// 也就是模型在看到工具列表时会读到的名字、描述和参数说明。
 	return mcp.NewTool("take_screenshot",
 		mcp.WithDescription("Take a screenshot of the cloud phone screen; if using this tool, please go to VolceEngine TOS and create a bucket."),
 	)
@@ -26,6 +28,8 @@ func NewTakeScreenshotTool() mcp.Tool {
 
 func HandleTakeScreenshot() func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		// handler 的流程比较固定：
+		// 鉴权 -> 取配置 -> 初始化 provider -> 执行业务 -> 封装 MCP 结果。
 		err := CheckAuth(ctx)
 		if err != nil {
 			return CallResultError(err)
@@ -43,6 +47,7 @@ func HandleTakeScreenshot() func(context.Context, mcp.CallToolRequest) (*mcp.Cal
 			return CallResultError(err)
 		}
 
+		// 返回值再包一层 {"result": ...}，方便上游保持和其他工具一致的消费方式。
 		result := map[string]interface{}{
 			"result": screenShotRes,
 		}

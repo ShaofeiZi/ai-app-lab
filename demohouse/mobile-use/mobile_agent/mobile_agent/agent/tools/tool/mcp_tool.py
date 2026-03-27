@@ -16,6 +16,13 @@ from mobile_agent.agent.tools.mcp import MCPHub
 
 
 class McpTool(Tool):
+    """
+    这是把 MCP 远程工具包装成本地统一 Tool 接口的适配层。
+
+    上层并不关心某个工具到底是“本地 Python 函数”还是“远程 MCP 服务”。
+    只要都包装成 Tool，就可以用同一种方式注册、展示 schema、执行调用。
+    """
+
     def __init__(self, mcp_hub: MCPHub, mcp_name: str, mcp_tool: StructuredTool):
         super().__init__(
             name=f"{mcp_name}:{mcp_tool.name}",
@@ -27,14 +34,18 @@ class McpTool(Tool):
         self.mcp_hub = mcp_hub
 
     async def handler(self, args: Optional[dict] = {}) -> str | None:
+        # 真正执行时，调用会被转发给 MCPHub，由它负责和远程 MCP server 通信。
         toolResults = await self.mcp_hub.call_tool(
             self.mcp_name, self.mcp_tool.name, args
         )
+        # MCP 返回的 content 可能包含多段不同类型的数据。
+        # 这里暂时只提取 text 类型，方便当前 agent 直接消费。
         contents = list(
             map(
                 lambda content: content.text if content.type == "text" else None,
                 toolResults.content,
             )
         )
-        # 暂时只取第一个
+        # 暂时只取第一段文本，是当前实现做的简化。
+        # 如果未来某个工具会返回多段有效文本，这里可能需要扩展。
         return contents[0]

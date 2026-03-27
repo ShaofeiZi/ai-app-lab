@@ -23,14 +23,17 @@ logger = logging.getLogger(__name__)
 
 
 def main():
-    # 打印配置信息
+    # main 是整个 Python 服务进程的启动入口。
+    # 初学者可以把它理解成“先把启动参数打印出来，再把 Web 服务器真正跑起来”的总开关。
     logger.info(f"Starting {settings.app_name} v{settings.app_version}")
     logger.info(f"Environment: {settings.env}")
     logger.info(
         f"Server config: host={settings.server.host}, port={settings.server.port}"
     )
 
-    # 启动服务器
+    # 这里交给 uvicorn 启动 FastAPI 应用。
+    # "app:app" 的前一个 app 是文件名 `app.py`，
+    # 后一个 app 是这个文件里导出的 FastAPI 实例对象。
     uvicorn.run("app:app", host=settings.server.host, port=settings.server.port)
 
 

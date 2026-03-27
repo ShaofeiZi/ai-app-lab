@@ -23,6 +23,8 @@ import (
 )
 
 func CheckAuth(ctx context.Context) error {
+	// 每个工具真正执行前都先检查 context 里的鉴权结果，
+	// 这样工具文件本身不需要重复解析请求头或环境变量。
 	authResult := ctx.Value(consts.AuthResult{})
 	if authResult == nil || authResult.(string) != consts.AuthResultOk {
 		return fmt.Errorf("auth failed")
@@ -31,6 +33,8 @@ func CheckAuth(ctx context.Context) error {
 }
 
 func GetMobileUseConfig(ctx context.Context) (*config.MobileUseConfig, error) {
+	// server 层已经把请求里的产品、设备、TOS、鉴权信息拼成了 MobileUseConfig，
+	// 这里直接取出给后续 service 层使用。
 	mobileUseConfig := ctx.Value(consts.MobileUseConfigKey{})
 	if mobileUseConfig == nil {
 		return nil, fmt.Errorf("mobile use config not found")
@@ -40,6 +44,8 @@ func GetMobileUseConfig(ctx context.Context) (*config.MobileUseConfig, error) {
 }
 
 func CallResultError(err error) (*mcp.CallToolResult, error) {
+	// MCP 协议要求工具调用返回结构化结果。
+	// 这里把 Go 的 error 转成 MCP 的错误结果，便于上层模型识别“这次工具失败了”。
 	toolResult := &mcp.CallToolResult{
 		Content: []mcp.Content{},
 		IsError: true,
@@ -55,6 +61,8 @@ func CallResultSuccess(content string) (*mcp.CallToolResult, error) {
 }
 
 func InitMobileUseService(ctx context.Context, mobileUseConfig *config.MobileUseConfig) (service.MobileUseProvider, error) {
+	// 这里把 context 中准备好的配置组装成 provider。
+	// 初学者可以理解为：MCP 工具层本身不直接打云接口，而是先得到一个“会操作云手机的服务对象”。
 	if mobileUseConfig == nil {
 		return nil, fmt.Errorf("mobile use config is nil")
 	}
@@ -103,6 +111,8 @@ func InitMobileUseService(ctx context.Context, mobileUseConfig *config.MobileUse
 }
 
 func GetInt64Param(args map[string]interface{}, key string) (int64, error) {
+	// MCP 参数是动态 map，数字有时会被反序列化成 int，有时是 float64。
+	// 这里统一兜底成 int64，避免每个工具自己重复写类型判断。
 	val, exists := args[key]
 	if !exists {
 		return 0, fmt.Errorf("%s is required", key)
@@ -121,6 +131,7 @@ func GetInt64Param(args map[string]interface{}, key string) (int64, error) {
 }
 
 func CheckArgs(args any) (map[string]interface{}, error) {
+	// 请求里没有参数，或者参数不是预期的 map 结构时，尽早失败。
 	if args == nil {
 		return nil, fmt.Errorf("args is nil")
 	}

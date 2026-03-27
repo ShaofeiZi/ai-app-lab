@@ -37,6 +37,8 @@ type MobileUseServer struct {
 }
 
 func NewMobileUseServer() *MobileUseServer {
+	// 这里把所有对外可用的 MCP 工具集中注册到同一个服务实例中。
+	// Agent 侧之后连上这个 server，就能看到这些工具的定义和调用入口。
 	mcpServer := mcp_srv.NewMCPServer(
 		"mobile_use_mcp_server",
 		"0.0.1",
@@ -89,6 +91,8 @@ func NewMobileUseServer() *MobileUseServer {
 }
 
 func (s *MobileUseServer) StartSSE(baseUrl string) *mcp_srv.SSEServer {
+	// SSE 模式下把 authFromRequest 注入进去，
+	// 后续每个请求都能把 header 里的鉴权信息转成 context。
 	return mcp_srv.NewSSEServer(s.server,
 		mcp_srv.WithBaseURL(baseUrl),
 		mcp_srv.WithSSEContextFunc(authFromRequest),
@@ -99,6 +103,7 @@ func (s *MobileUseServer) StartSSE(baseUrl string) *mcp_srv.SSEServer {
 // It returns a done channel that is closed when the stdio server exits
 func (s *MobileUseServer) StartStdio() error {
 	go func() {
+		// stdio 模式常用于“一个进程拉起另一个进程并通过标准输入输出通信”的集成方式。
 		err := mcp_srv.ServeStdio(s.server, mcp_srv.WithStdioContextFunc(authFromEnv))
 		s.cancel()      // Cancel context when stdio exits
 		close(s.doneCh) // Signal that stdio is done
@@ -123,7 +128,7 @@ func (s *MobileUseServer) WaitForDone() error {
 func (s *MobileUseServer) StartSSEWithServer(addr string, baseUrl string) error {
 	sseServer := s.StartSSE(baseUrl)
 
-	// Start HTTP server in a goroutine
+	// HTTP 服务单独放在 goroutine 中启动，这样 main goroutine 还能继续等待结束信号。
 	go func() {
 		err := sseServer.Start(addr)
 		if err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -141,7 +146,6 @@ func (s *MobileUseServer) StartStreamableHTTPServer(addr string) error {
 		mcp_srv.WithHTTPContextFunc(authFromRequest),
 	)
 
-	// Start HTTP server in a goroutine
 	go func() {
 		err := server.Start(addr)
 		if err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -160,6 +164,7 @@ func (s *MobileUseServer) Shutdown() {
 }
 
 func authFromEnv(ctx context.Context) context.Context {
+	// stdio 模式没有 HTTP 请求头，所以只能从环境变量拿鉴权信息和 pod 信息。
 	accessKeyId := os.Getenv("ACEP_ACCESS_KEY")
 	accessKeySecret := os.Getenv("ACEP_SECRET_KEY")
 	productId := os.Getenv("ACEP_PRODUCT_ID")
@@ -171,6 +176,7 @@ func authFromEnv(ctx context.Context) context.Context {
 	region := os.Getenv("ACEP_TOS_REGION")
 	endpoint := os.Getenv("ACEP_TOS_ENDPOINT")
 	if accessKeyId == "" || accessKeySecret == "" || productId == "" || deviceId == "" || bucket == "" || region == "" || endpoint == "" {
+		// 把鉴权失败的结果直接写进 context，后续工具执行时统一检查。
 		ctx = context.WithValue(ctx, consts.AuthResult{}, consts.AuthResultErrEmpty)
 		return ctx
 	}
@@ -205,6 +211,8 @@ func authFromEnv(ctx context.Context) context.Context {
 }
 
 func authFromRequest(ctx context.Context, r *http.Request) context.Context {
+	// 网络模式下，调用方把授权信息放在 Authorization 头里，内容是 base64 编码后的 JSON。
+	// 这里先解码，再组装成 MobileUseConfig 放进 context，供各个 tool handler 取用。
 	authStr := r.Header.Get("Authorization")
 	if authStr == "" {
 		ctx = context.WithValue(ctx, consts.AuthResult{}, consts.AuthResultErrEmpty)

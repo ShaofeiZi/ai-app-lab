@@ -60,6 +60,8 @@ function ChatPageContent() {
     stsToken: STSToken;
     accountId: string;
   }) => {
+    // 这里把后端返回的 pod 初始化信息交给 vePhone 客户端，
+    // 这样右侧云手机画面才知道要连哪台设备、用什么 token、画布尺寸是多少。
     vePhone.setPodInitInfo({
       podId,
       productId,
@@ -72,6 +74,9 @@ function ChatPageContent() {
 
   const initMobileUse = (_sessionData: SessionResponse) => {
     console.log('使用缓存的会话数据');
+    // cloudAgent 和 vePhone 各自关心的数据不同：
+    // cloudAgent 需要知道 pod/product id 用来发后端请求，
+    // vePhone 需要完整的 token 和尺寸信息来展示云手机画面。
     updatePodAgent({
       productId: _sessionData?.pod?.product_id,
       podId: _sessionData?.pod?.pod_id,
@@ -89,11 +94,15 @@ function ChatPageContent() {
   }
 
   useEffect(() => {
-    // 检查身份验证和设置
+    // 这里负责聊天页的“入场检查”：
+    // 1. 确认 cloudAgent 已经初始化；
+    // 2. 确认 threadId 存在；
+    // 3. 恢复或重新拉取 sessionData；
+    // 4. 初始化云手机和倒计时。
     const setupSession = async () => {
       setIsLoading(true);
 
-      // 鉴权逻辑：如果没有 threadId，重定向到首页
+      // 没有 threadId 说明用户不是从有效会话进来的，直接退回首页。
       if (!cloudAgent) {
         return;
       }
@@ -103,11 +112,13 @@ function ChatPageContent() {
       }
 
       try {
-        // 优先使用全局状态中的会话数据
+        // 优先使用已经在全局状态里的 sessionData，避免重复请求。
         if (sessionData) {
           initMobileUse(sessionData)
         } else {
-          // 如果没有会话数据，但有 threadid 则请求一下会话看看
+          // 页面刷新后常见的情况是：
+          // threadId 还在 sessionStorage 里，但内存中的 sessionData 已经没了。
+          // 这时再请求一次 createSession 来补全它。
           const checkThreadId = async () => {
             if (cloudAgent?.threadId) {
               try {
@@ -137,7 +148,7 @@ function ChatPageContent() {
     setupSession();
   }, [cloudAgent, router, sessionData, searchParams]);
 
-  // 加载状态下显示更友好的加载指示器
+  // 在会话尚未恢复完成前，不急着渲染主界面，先给用户一个明确的初始化状态。
   if (isLoading) {
     return (
       <div className="h-screen w-screen flex items-center justify-center"
@@ -184,6 +195,7 @@ function ChatPageContent() {
                   <div className="p-6 flex flex-col items-center justify-center flex-auto overflow-hidden">
                     <Phone />
                     <p className="max-w-[360px] text-xs text-gray-500 text-center mt-4 flex-0 whitespace-nowrap">
+                      {/* 这里明确告诉体验用户：右侧画面是只读展示，不允许直接点击操作。 */}
                       因安全合规原因，体验页面已禁止与云手机实例点击交互
                       <br />
                       请知悉由于Demo应用白名单限制，部分应用会安装失败
@@ -203,7 +215,7 @@ function ChatPageContent() {
   );
 }
 
-// 创建一个加载组件
+// Suspense fallback 会在 searchParams 等客户端能力尚未就绪时先展示。
 function ChatPageFallback() {
   return (
     <div className="h-screen w-screen flex items-center justify-center"
@@ -220,7 +232,7 @@ function ChatPageFallback() {
   );
 }
 
-// 主组件用 Suspense 包装
+// ChatPage 只是一个薄包装，真正的业务逻辑在 ChatPageContent 里。
 function ChatPage() {
   return (
     <Suspense fallback={<ChatPageFallback />}>

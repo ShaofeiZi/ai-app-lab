@@ -18,6 +18,8 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 )
 
+// NewScreenTapTool 声明“点击指定坐标”的工具。
+// 它只要求 x 和 y 两个数字参数，表示云手机屏幕上的点击位置。
 func NewScreenTapTool() mcp.Tool {
 	return mcp.NewTool("tap",
 		mcp.WithDescription("Tap at specified coordinates on the cloud phone screen"),
@@ -32,6 +34,8 @@ func NewScreenTapTool() mcp.Tool {
 	)
 }
 
+// HandleScreenTap 处理 tap 请求。
+// 外部请求进来后，先校验、再做类型转换、最后调用底层服务，这样每一层职责都比较清楚。
 func HandleScreenTap() func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		err := CheckAuth(ctx)
@@ -58,10 +62,14 @@ func HandleScreenTap() func(context.Context, mcp.CallToolRequest) (*mcp.CallTool
 		if err != nil {
 			return CallResultError(fmt.Errorf("y is required"))
 		}
+
+		// 这里把动态参数最终转换成明确的 int，再进入业务层。
 		err = handler.ScreenTap(ctx, int(x), int(y))
 		if err != nil {
 			return CallResultError(err)
 		}
+
+		// 返回统一成功文案，便于不同工具在上层形成一致的展示格式。
 		return CallResultSuccess("Tap the screen successfully")
 	}
 }

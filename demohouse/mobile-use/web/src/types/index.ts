@@ -11,6 +11,9 @@
 
 import { STSToken } from "@/lib/vePhone";
 
+// 这个文件放的是前后端共享或前端内部复用的数据结构。
+// 初学者可以把它看成“对象的说明书”，告诉我们某份数据应该长什么样。
+
 // 模型相关类型
 export interface Model {
   id: string;
@@ -25,7 +28,7 @@ export interface EnvironmentConfig {
   serviceUrl?: string;
 }
 
-// 聊天消息相关类型
+// UIMessage 是“页面上可能出现的消息形态”的联合类型。
 export type UIMessage = UIChatMessage | UIButtonMessage | UIThinkingMessage;
 
 export interface UIChatMessage {
@@ -47,6 +50,7 @@ export interface UIButtonMessage {
 
 export interface UIThinkingMessage {
   id: string;
+  // isThinking 为 true 表示这类消息不是普通对话文本，而是执行过程说明。
   isThinking: true;
   executionState: {
     status: 'executing' | 'completed' | 'idle';
@@ -58,7 +62,8 @@ export interface UIThinkingMessage {
   timestamp: number;
 }
 
-// 会话相关类型
+// Conversation 更偏向通用聊天产品的数据结构，
+// 当前 demo 里真正高频使用的是后面的 SessionBackendResponse / SessionResponse。
 export interface Conversation {
   id: string;
   title: string;
@@ -78,7 +83,9 @@ export type ErrorResponse = {
 }
 
 export type SessionBackendResponse = ErrorResponse & {
+  // thread_id 是浏览器和后端共享的会话主键。
   thread_id: string
+  // chat_thread_id 是 Agent 内部使用的对话上下文 ID。
   chat_thread_id: string
   userInfo: {
     accountId: string
@@ -96,6 +103,8 @@ export type SessionBackendResponse = ErrorResponse & {
 }
 
 export type SessionResponse = {
+  // SessionResponse 对比 SessionBackendResponse 少了 thread_id / chat_thread_id / error，
+  // 更适合前端把“真正的会话内容”放进全局状态。
   userInfo: {
     accountId: string
     userId: string

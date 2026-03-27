@@ -16,6 +16,7 @@ import { cn } from '@/lib/utils/css';
 import { UIChatMessage } from '@/types';
 import { SessionDataAtom } from '@/app/atom';
 
+// 这是渲染单条消息气泡时真正需要的最小字段集合。
 interface BaseMessage {
   id: string;
   content: string;
@@ -26,13 +27,14 @@ interface BaseMessage {
 
 export function UserMessage({ message }: { message: BaseMessage | UIChatMessage }) {
   const sessionData = useAtomValue(SessionDataAtom);
-  
+
+  // 没有文字内容时就不渲染，避免页面出现空白气泡。
   if (!message.content) return null;
 
-  // 从sessionData中获取用户名，如果没有则显示默认值
+  // 优先展示当前会话中的用户名，没有时退回到默认名称。
   const userName = sessionData?.userInfo?.name || '火山账户名';
-  
-  // 获取用户名的第一个字符，用于头像显示
+
+  // 这里用名字首字母充当简易头像，避免必须依赖真实头像资源。
   const avatarChar = userName.charAt(0).toUpperCase();
 
   return (

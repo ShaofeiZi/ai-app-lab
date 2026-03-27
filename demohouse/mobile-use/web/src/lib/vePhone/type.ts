@@ -10,6 +10,7 @@
 // limitations under the License.
 
 export interface STSToken {
+  // 这组字段是云服务临时凭证，作用类似“限时钥匙”。
   AccessKeyID: string;
   SecretAccessKey: string;
   SessionToken: string;
@@ -22,11 +23,12 @@ export interface StartConfig {
   podId: string;
   token: STSToken;
   rotation?: 'portrait';
+  // 是否锁住屏幕方向，常见于移动设备场景。
   isScreenLock?: boolean; // !isPc
   mute?: boolean;
   audioAutoPlay?: boolean;
   remoteWindowSize?: {
-    // 填死, agent 识别规约
+    // 这里是固定分辨率约定，便于 Agent 侧统一理解坐标系统。
     width: 1080;
     height: 1920;
   };
@@ -47,6 +49,7 @@ export interface VePhoneConstructorParams {
 }
 
 export interface VePhoneStatic {
+  // SDK 本身暴露的是一个构造函数。
   new(params: VePhoneConstructorParams): VePhone;
   isRtcSupported: () => boolean;
 }
@@ -84,6 +87,7 @@ export const enum MouseButton {
 }
 
 export interface VePhone {
+  // on 用来监听 SDK 运行过程中抛出的各种事件，比如启动成功、失败、横竖屏切换等。
   on: (
     event: string,
     callback: (data: unknown) => void | Promise<void>,
@@ -98,18 +102,17 @@ export interface VePhone {
   screenShot: (isSavedOnPod: boolean) => Promise<{
     /**
      * 截图结果:
-     * 0：截图成功
-     * -1：存储空间不足，截图失败
-     * -2：未知原因，截图失败
+     * 0 表示成功；
+     * 负数一般表示失败，并附带不同失败原因。
      */
     result: number;
-    /** 在云手机实例中保存截图文件的路径，例如：/sdcard/Pictures/Screenshots/20220721_164937.jpg */
+    /** 保存在云手机实例内部的截图路径。 */
     savePath: string;
-    /** 错误码，正常情况为 0 */
+    /** 错误码，成功时通常为 0。 */
     errorCode?: number;
-    /** 错误信息，正常情况为空 */
+    /** 错误信息，成功时通常为空字符串。 */
     message: string;
-    /** 截图成功时返回截图文件的下载链接，链接有效期1小时 */
+    /** 截图成功时提供下载链接，链接通常有时效限制。 */
     downloadUrl?: string;
   }>;
   launchApp: (appId: string) => Promise<{ result: number; message: string }>;

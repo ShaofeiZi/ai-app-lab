@@ -13,13 +13,16 @@ import * as url from "url"
 import { ApiHandler, withMiddleware } from "../../_utils/middleware";
 import { fetchServer } from "@/app/api/_utils/fetch";
 
-
+// 这里把基础地址和具体接口路径拼成最终转发目标。
 const target = url.resolve(process.env.CLOUD_AGENT_BASE_URL || "", 'api/v1/agent/cancel')
 
 const _post: ApiHandler = async (request: Request, middlewareResult) => {
+  // 取消会话时只需要告诉后端当前线程编号，
+  // 后端就能定位到对应的 Agent 任务。
   const { thread_id } = await request.json();
   const response = await fetchServer(target, middlewareResult, { thread_id }, 'POST');
   return response;
 }
 
+// 公共中间件会先完成鉴权、用户信息提取等动作，再进入真正的业务处理函数。
 export const POST = withMiddleware(_post);

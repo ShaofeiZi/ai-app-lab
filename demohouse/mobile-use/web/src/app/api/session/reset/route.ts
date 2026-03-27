@@ -13,15 +13,18 @@ import * as url from "url"
 import { ApiHandler, withMiddleware } from "../../_utils/middleware";
 import { fetchServer } from "../../_utils/fetch";
 
+// “重置会话”不是只清空前端页面，而是向后端申请一个全新的 thread。
 const target = url.resolve(process.env.CLOUD_AGENT_BASE_URL || "", 'api/v1/session/reset')
 
 const _post: ApiHandler = async (request: Request, middlewareResult) => {
+  // 旧 thread_id 用来告诉后端：当前要重置的是哪一条会话。
   const { thread_id } = await request.json();
   const response = await fetchServer(
     target,
     middlewareResult,
     { thread_id },
     'POST',
+    // 重置后顺带把用户信息一并返回，前端更新状态会更方便。
     { withUserInfo: true }
   )
 

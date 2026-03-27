@@ -32,7 +32,8 @@ logger = logging.getLogger(__name__)
 
 
 async def prepare_node(state: MobileUseAgentState):
-    # 初始化上下文管理器
+    # 为当前线程初始化上下文管理器，并注册到全局对象管理器中。
+    # 后续 model/tool 节点都会通过 thread_id 取回这一份上下文，避免在状态里反复搬运复杂对象。
     context_manager = ContextManager(messages=list(state.get("messages", [])))
     thread_id = state.get("thread_id")
     agent_object_manager.add_context_object(
@@ -41,7 +42,8 @@ async def prepare_node(state: MobileUseAgentState):
 
     context_manager.add_system_message(DoubaoLLM.prompt)
 
-    # FIXME: 临时给一个深度思考的提示，langchain-openai 没有把豆包的think 吐出来，需要替换为 langchain-deepseek
+    # 这里主动先写出一条“思考中”事件，原因是当前模型接入层无法稳定流出 think 内容。
+    # 这样前端至少能在真正结果返回前展示一个占位状态，避免用户误以为请求卡死。
     sse_writer = get_stream_writer()
     sse_writer(
         format_sse(
@@ -54,7 +56,7 @@ async def prepare_node(state: MobileUseAgentState):
             )
         )
     )
-    # 更新消息
+    # 把补充过 system prompt 的消息重新写回状态，保证后续节点读取到的是最新上下文。
     state.update(messages=context_manager.get_messages())
     return state
 
@@ -66,12 +68,13 @@ async def model_node(state: MobileUseAgentState) -> MobileUseAgentState:
     context_manager = agent_object_manager.get_context_manager(state.get("thread_id"))
     iteration_count = state.get("iteration_count")
 
-    # 获取截图
+    # 每一轮推理前都先刷新截图，让模型基于最新屏幕状态做决策。
     screenshot_state = await mobile.take_screenshot()
     state.update(screenshot=screenshot_state.get("screenshot"))
     state.update(screenshot_dimensions=screenshot_state.get("screenshot_dimensions"))
 
-    # 准备消息
+    # 首轮与后续轮次的消息组织方式不同：
+    # 首轮只需要拼用户目标和初始截图，后续轮次还要带上工具执行结果与迭代次数。
     if iteration_count == 0:
         context_manager.add_user_initial_message(
             message=state.get("user_prompt"), screenshot_url=state.get("screenshot")
@@ -85,18 +88,22 @@ async def model_node(state: MobileUseAgentState) -> MobileUseAgentState:
             screenshot_dimensions=state.get("screenshot_dimensions"),
         )
 
-    # 保留最后5张图片
+    # 控制上下文中的图片数量，避免多轮执行后消息体膨胀过快，影响成本与模型输入长度。
     context_manager.keep_last_n_images_in_messages(5)
     state.update(messages=context_manager.get_messages())
 
-    # 调用模型并处理重试
+    # 模型实例与 thread_id 绑定，便于在一轮任务内复用线程级别的上下文和流式输出通道。
     llm = DoubaoLLM(thread_id=state.get("thread_id"), is_stream=state.get("is_stream"))
 
-    # 更新步数
+    # 在真正调用模型前更新步数统计，确保成本计算与执行轮次保持一致。
     cost_calculator = agent_object_manager.get_cost_calculator(state.get("thread_id"))
     cost_calculator.update_step(iteration_count)
 
-    # 调用模型
+    # 模型返回四部分结果：
+    # chunk_id 用于串联前端消息，
+    # content 是完整回答，
+    # summary 是非流式时展示给前端的摘要，
+    # tool_call 是后续工具节点要解析的动作描述。
     chunk_id, content, summary, tool_call = await llm.async_chat(
         context_manager.get_messages()
     )
@@ -104,11 +111,11 @@ async def model_node(state: MobileUseAgentState) -> MobileUseAgentState:
     logger.info(f"content========: {content}")
 
     if not state.get("is_stream"):
-        # 非流式传输直接突出对应的summary
+        # 非流式模式下没有增量 think 输出，因此这里补发一条 summary 给前端。
         sse_writer = get_stream_writer()
         sse_writer(get_writer_think(state, chunk_id, summary))
 
-    # 更新状态
+    # 把模型产物固化回状态，供后续解析工具、继续迭代和最终回放使用。
     context_manager.add_ai_message(content)
 
     state.update(
@@ -125,6 +132,7 @@ async def tool_valid_node(state: MobileUseAgentState) -> MobileUseAgentState:
     """工具验证节点，验证工具调用是否有效"""
     tool_call_str = state.get("tool_call_str")
     action_parser = agent_object_manager.get_action_parser(state.get("thread_id"))
+    # 解析工具调用前先注入当前屏幕尺寸，避免坐标类动作在不同分辨率上解析失真。
     action_parser.change_phone_dimensions(
         width=state.get("screenshot_dimensions")[0],
         height=state.get("screenshot_dimensions")[1],
@@ -136,6 +144,8 @@ async def tool_valid_node(state: MobileUseAgentState) -> MobileUseAgentState:
     tool_name = tool_call.get("name")
 
     if tools.is_special_tool(tool_name):
+        # 特殊工具不走通用工具执行节点，而是在这里直接消费并写回专用消息，
+        # 例如结束、等待或其他需要特殊渲染/记忆策略的动作。
         sse_writer = get_stream_writer()
         content = await tools.exec(tool_call)
         sse_writer(format_sse(tools.get_special_message(tool_name, content, state)))
@@ -147,37 +157,38 @@ async def tool_valid_node(state: MobileUseAgentState) -> MobileUseAgentState:
 
 async def tool_node(state: MobileUseAgentState) -> MobileUseAgentState:
     """工具执行节点，执行工具调用"""
-    # 检查 sse 链接是否断开
+    # 如果前端已经断开 SSE，就没有必要继续向下执行真实操作，直接终止这一轮。
     if agent_object_manager.get_sse_connection(state.get("thread_id")).is_set():
         logger.info("tool_node start, sse 断开链接")
         raise SSEException()
 
     tool_call = state.get("tool_call")
     sse_writer = get_stream_writer()
-    # 写工具 input
+    # 先把工具输入透出给前端，保证用户可以看到模型到底决定调用了什么动作。
     sse_writer(get_writer_tool_input(state, tool_call))
 
     logger.info(f"tool_call========: {tool_call}")
-    # 检查特殊工具
     try:
         tools = agent_object_manager.get_tools(state.get("thread_id"))
         result = await tools.exec(tool_call)
+        # 这里把原始结果包装成统一字符串，后续迭代时模型会把它作为上一轮工具反馈继续消费。
         output = {
             "result": f"{tool_call['name']}:({tool_call['arguments']})\n{result}\n操作下发成功"
         }
         state.update(tool_output=output)
-        # 等待操作完成
+        # 某些设备操作需要等待界面稳定，否则下一轮截图可能仍停留在旧画面。
         await asyncio.sleep(state.get("step_interval"))
 
     except Exception as e:
         logger.error(f"tool_call_client.call error: {e}")
         output = {"result": f"Error: {str(e)}"}
+        # 失败时先发 stop 事件，让前端知道这次工具调用提前终止。
         sse_writer((get_writer_tool_output(state, tool_call, output, status="stop")))
         state.update(tool_output=output)
 
     logger.info(f"tool_output========: {state.get('tool_output')}")
 
-    # 写工具 output
+    # 无论是否异常，最后都写一条工具输出事件，保持前端状态机的消费路径一致。
     sse_writer(get_writer_tool_output(state, tool_call, output, status="success"))
 
     return state
@@ -186,14 +197,14 @@ async def tool_node(state: MobileUseAgentState) -> MobileUseAgentState:
 def handle_parse_failure(state: MobileUseAgentState) -> bool:
     tool_call = state.get("tool_call")
 
-    # 检查是否是解析失败的情况
+    # 约定 `error_action` 代表动作解析失败，而不是模型真的想调用名为 error_action 的工具。
     if not tool_call or (
         isinstance(tool_call, dict) and tool_call.get("name") == "error_action"
     ):
         iteration_count = state.get("iteration_count", 0)
         max_iterations = state.get("max_iterations")
 
-        # 如果还没达到最大迭代次数，可以重试
+        # 只要还没达到上限，就允许回到模型节点重新生成动作，避免一次解析失败直接结束任务。
         if iteration_count < max_iterations:
             return True
 
@@ -202,7 +213,8 @@ def handle_parse_failure(state: MobileUseAgentState) -> bool:
 
 async def should_react_continue(state: MobileUseAgentState) -> str:
     """条件边，决定是否继续执行"""
-    # 检查是否达到最大迭代次数
+    # 这是工具执行后的轮次控制：
+    # 达到最大步数则结束，否则继续回到模型节点观察最新页面并做下一轮决策。
     iteration_count = state.get("iteration_count", 0)
     max_iterations = state.get(
         "max_iterations",
@@ -211,7 +223,6 @@ async def should_react_continue(state: MobileUseAgentState) -> str:
     if iteration_count >= max_iterations:
         return "finish"
 
-    # 否则继续执行
     return "continue"
 
 

@@ -24,6 +24,7 @@ const useCreateSessionAPI = () => {
     productId?: string,
     podId?: string,
   ) => {
+    // 如果 CloudAgent 还没初始化，说明当前页面还没有准备好会话环境。
     if (!cloudAgent) {
       return null;
     }
@@ -31,6 +32,7 @@ const useCreateSessionAPI = () => {
     const _productId = productId || cloudAgent.productId;
     const _podId = podId || cloudAgent.podId;
 
+    // productId / podId 可以来自用户当前输入，也可以来自浏览器里已经记住的值。
     if (!_productId || !_podId) {
       return null;
     }
@@ -41,7 +43,10 @@ const useCreateSessionAPI = () => {
     })) as SessionBackendResponse;
 
     if (data) {
-      // 将会话数据存储到全局状态
+      // 这里同时更新三类状态：
+      // 1. CloudAgent 自己记住 threadId / productId / podId；
+      // 2. Jotai 全局状态保存完整 sessionData；
+      // 3. chatThreadId 变化时重置消息列表上下文。
       cloudAgent.setThreadId(data.thread_id);
       cloudAgent.setProductPodId(data.pod.product_id, data.pod.pod_id);
       setSessionData(data);

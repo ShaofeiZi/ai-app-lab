@@ -38,12 +38,18 @@ class CreateSessionRequest(BaseModel):
 
 @router.post("/create")
 async def create_session(request: Request, body: CreateSessionRequest):
+    # create_session 的任务是：
+    # 1. 校验并拿到 pod 的最新可用信息；
+    # 2. 如果已有 thread，就刷新它；
+    # 3. 如果没有，就创建一个全新的会话。
     account_id = request.state.account_id
     thread_id = body.thread_id
     product_id = body.product_id
     pod_id = body.pod_id
 
     if thread_id and session_manager.has_thread(thread_id):
+        # 老会话继续使用时，不重新生成 thread_id，
+        # 只刷新 pod 与鉴权信息，保证浏览器刷新后还能接着用原会话。
         response_json = await session_manager.validate(
             device_id=pod_id,
             product_id=product_id,
@@ -56,6 +62,8 @@ async def create_session(request: Request, body: CreateSessionRequest):
             auth_info=response_json["auth_info"],
         )
     else:
+        # 新会话会生成新的 thread_id。
+        # 注意：thread_id 是“前端会话 ID”，而 chat_thread_id 是“Agent 对话上下文 ID”，两者用途不同。
         thread_id = str(uuid.uuid4())
         response_json = await session_manager.validate(
             device_id=pod_id,
@@ -105,7 +113,8 @@ async def reset_session(request: Request, body: ResetSessionRequest):
     if old_session.account_id != account_id:
         raise APIException(code=403, message="当前会话不匹配")
 
-    # 生成新的 threadId
+    # 这里不会换掉最外层 thread_id，
+    # 只会重置内部 chat_thread_id，相当于“同一台云手机上开启一段新的对话记忆”。
     new_chat_thread_id = str(uuid.uuid4())
 
     logger.info(f"重置会话: {old_session.chat_thread_id} -> {new_chat_thread_id}")

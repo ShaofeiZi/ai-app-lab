@@ -23,17 +23,17 @@ import toolLoadingIcon from '@/assets/tool-loading.png';
 import stopIcon from '@/assets/tool-stop.png';
 import { ThinkingMessage, TaskStep } from '@/hooks/useCloudAgent';
 
-// 添加旋转动画的 CSS 类
+// “思考中”的小图标会旋转，给用户一个正在执行中的视觉反馈。
 const spinAnimation = 'animate-spin';
 
-// 状态文本常量
+// 同一种工具调用在 UI 里会显示不同状态文本。
 const STATUS_TEXT = {
   start: '正在执行命令',
   success: '执行完成',
   stop: '执行失败',
 };
 
-// 状态图标常量
+// 不同状态搭配不同图标，便于用户一眼看出当前步骤是在进行中、已完成还是已失败。
 const STATUS_ICON = {
   start: (
     <Image
@@ -50,7 +50,8 @@ const STATUS_ICON = {
   interrupt: <Image src={userInterruptIcon.src} alt="interrupted" width={12} height={12} className="w-3 h-3" />,
 };
 
-// 执行状态卡片组件
+// ProgressCard 是执行过程里的小卡片。
+// 它既可以显示工具调用，也可以显示用户中断提示，所以做成了一个可复用小组件。
 interface ProgressCardProps {
   className?: string;
   content?: React.ReactNode;
@@ -79,7 +80,8 @@ export interface ThinkingMessageProps {
 const ThinkingMessageComponent: React.FC<ThinkingMessageProps> = ({ messageId, message }) => {
   const [showExecutionStatus, setShowExecutionStatus] = useState(true);
 
-  // 渲染单个步骤的函数
+  // 每个 step 都代表 Agent 执行过程中的一个小片段。
+  // 可能是纯思考文本，也可能附带一个工具调用结果。
   const renderStep = (step: TaskStep) => {
     switch (step.type) {
       case 'think':
@@ -87,6 +89,8 @@ const ThinkingMessageComponent: React.FC<ThinkingMessageProps> = ({ messageId, m
           <>
             <div className="text-[#42464E] text-[13px]">{step.content || ''}</div>
             {step.toolCall && (
+              // 同一个 think step 下如果带有 toolCall，
+              // 说明模型在这一步思考后紧接着执行了一个具体工具动作。
               <ProgressCard
                 className="bg-white border-[#E6E3DE]"
                 icon={STATUS_ICON[step.toolCall.status || 'success']}
@@ -145,6 +149,7 @@ const ThinkingMessageComponent: React.FC<ThinkingMessageProps> = ({ messageId, m
             <div className="space-y-2 mt-4">
               {message.steps.map(step => (
                 <div className="relative mb-4 py-2" key={`${step.id}-${step.type}`}>
+                  {/* 左侧竖线把一个任务里的多个步骤串起来，形成时间线感。 */}
                   <div className="absolute left-[10px] w-[1px] h-full bg-[#4D6B9933] -mt-2" />
                   <div className="space-y-2 ml-8">{renderStep(step)}</div>
                 </div>
@@ -156,6 +161,8 @@ const ThinkingMessageComponent: React.FC<ThinkingMessageProps> = ({ messageId, m
           <ReactMarkdown
             rehypePlugins={[rehypeRaw]}
             components={{
+              // summary 是 markdown 文本，所以这里自定义了几种常见元素的渲染方式，
+              // 保证代码块、列表、标题在聊天气泡里显示得更清楚。
               p: ({ children }) => <p className="mb-2 last:mb-0 text-[14px] text-[#0C0D0E]">{children}</p>,
               code: ({ node, inline, className, children, ...props }: any) => {
                 const match = /language-(\w+)/.exec(className || '');

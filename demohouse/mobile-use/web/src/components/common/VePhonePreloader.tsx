@@ -15,7 +15,8 @@ import { useEffect } from 'react';
 
 export function VePhonePreloader() {
   useEffect(() => {
-    // 预加载 VePhone SDK
+    // 这个组件不显示任何 UI，它的任务只是提前下载 VePhone SDK。
+    // 这样用户真正进入云手机页面时，可以减少首次等待时间。
     const preloadSDK = async () => {
       try {
         const { default: UMDLoader } = await import('@/lib/vePhone/loader');
@@ -30,5 +31,6 @@ export function VePhonePreloader() {
     preloadSDK();
   }, []);
 
-  return null; // 这个组件不渲染任何内容
-} 
+  // 这是一个“只做副作用，不渲染界面”的 React 组件。
+  return null;
+}

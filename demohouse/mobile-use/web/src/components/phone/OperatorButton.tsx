@@ -19,15 +19,18 @@ const OperatorButton = ({
   callback: () => Promise<void> | void;
   icon: React.ReactNode;
 }) => {
+  // loading 表示当前按钮触发的异步操作是否尚未完成。
   const [loading, setLoading] = useState(false);
 
   const handleClick = async () => {
     try {
       setLoading(true);
+      // 具体执行什么操作由外部传入，当前组件只负责统一的按钮行为。
       await callback();
     } catch (error) {
       console.error(error);
     } finally {
+      // 无论成功还是失败，都要恢复按钮可点击状态。
       setLoading(false);
     }
   };

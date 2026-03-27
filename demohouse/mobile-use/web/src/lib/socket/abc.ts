@@ -56,13 +56,18 @@ export type SSEMessage =
   | SSEToolCallMessageData;
 
 /**
- * 同构 Socket 抽象类，用于 WebClient 和 Electron 之间通信 或者 和 服务端 SSE 通信。保持 Web 端逻辑几乎不变
+ * 同构的流式消息抽象层。
+ * 目标不是强行实现浏览器原生 WebSocket 语义，而是为“任意可推送 SSE-like 消息的后端”
+ * 提供统一接口，这样 WebClient、Electron 或其他宿主环境都可以复用同一套消费逻辑。
  */
 abstract class SSELike {
+  // 建立底层连接，例如浏览器中的 EventSource 或 Electron 中的桥接实现。
   abstract connect(): Promise<void>;
 
+  // 注册消息监听器，要求外层只关心结构化后的业务消息，而不是原始传输细节。
   abstract onMessage(handler: (json: SSEMessage) => void): void;
 
+  // 关闭连接并释放底层资源，避免页面切换或会话重置后出现幽灵事件流。
   abstract close(): void;
 }
 

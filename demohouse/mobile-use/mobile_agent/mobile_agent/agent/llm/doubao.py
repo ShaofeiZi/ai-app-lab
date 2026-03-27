@@ -30,6 +30,7 @@ class DoubaoLLM:
         self.is_stream = is_stream
         self.thread_id = thread_id
 
+        # 这里从统一配置里取出当前 agent 该用哪个模型、温度是多少、最大输出多少 token。
         agent_config = get_agent_config("mobile_use")
         if agent_config.modelKey:
             model_config = get_model_config(agent_config.modelKey)
@@ -39,6 +40,9 @@ class DoubaoLLM:
             self.temperature = model_config.temperature
             self.max_tokens = model_config.max_tokens
 
+        # LangChain 版本的 ChatOpenAI 主要用在流式场景；
+        # 非流式场景下，下面的 _invoke_sync_model 还会直接走 OpenAI 客户端，
+        # 因为那样更容易拿到 token usage 统计。
         self.llm = ChatOpenAI(
             api_key=self.api_key,
             base_url=self.base_url,
@@ -53,6 +57,8 @@ class DoubaoLLM:
         self, messages: List[BaseMessage]
     ) -> tuple[str, str, str, str]:
         """调用模型并处理重试逻辑"""
+        # 模型调用不是 100% 稳定的，可能遇到临时网络问题或上游报错。
+        # 这里做一个有限次数重试，避免偶发失败直接让整轮任务中断。
         max_retries = 3
         retry_count = 0
 
@@ -78,6 +84,8 @@ class DoubaoLLM:
                 await asyncio.sleep(1)
 
     async def _invoke_model(self, messages: List[BaseMessage]) -> tuple[str, str, str]:
+        # 是否流式会直接决定调用哪条分支：
+        # 流式分支逐块消费 token，非流式分支一次拿完整结果。
         if self.is_stream:
             return await self._invoke_stream_model(messages)
         else:
@@ -86,11 +94,15 @@ class DoubaoLLM:
     async def _invoke_stream_model(
         self, messages: List[BaseMessage]
     ) -> tuple[str, str, str]:
+        # 流式模式下，这里并不直接把每个 chunk 返回给上层；
+        # 而是交给 stream_pipeline 聚合，最后得到 content / summary / tool_call 三段结果。
         index = 0
         chunk_id = ""
         response = self.llm.astream(messages)
         async for chunk in response:
             if index == 0:
+                # 第一块 chunk 最重要的是拿到稳定的 chunk_id，
+                # 前端和后续图节点都靠它来串联这一轮模型输出。
                 chunk_id = chunk.id
                 stream_pipeline.create(id=chunk_id)
             index += 1
@@ -102,7 +114,8 @@ class DoubaoLLM:
         self, messages: List[BaseMessage]
     ) -> tuple[str, str, str]:
         use_openai_client = True
-        # Ark Api 在 Langchain 下拿不到 token usage
+        # Ark API 在 LangChain 这层不方便稳定拿到 token usage，
+        # 所以这里在非流式模式下直接走 OpenAI 兼容客户端。
         if use_openai_client:
             client = OpenAI(api_key=self.api_key, base_url=self.base_url)
             response = client.chat.completions.create(
@@ -117,6 +130,7 @@ class DoubaoLLM:
 
             cost_calculator = agent_object_manager.get_cost_calculator(self.thread_id)
             if cost_calculator:
+                # 把输入 / 输出 token 记到成本统计器里，便于后面估算调用成本。
                 cost_calculator.record_cost(
                     input_tokens=input_tokens, output_tokens=output_tokens
                 )
@@ -124,6 +138,8 @@ class DoubaoLLM:
         else:
             response = self.llm.invoke(messages)
             content = response.content
+        # 同步模式虽然不是边生成边展示，但仍然复用同一个 stream_pipeline，
+        # 这样最终得到的 summary / tool_call 解析流程和流式模式保持一致。
         stream_pipeline.create(id=response.id)
         stream_pipeline.pipe(id=response.id, delta=content)
         content, summary, tool_call = stream_pipeline.complete(id=response.id)

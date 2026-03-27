@@ -15,12 +15,15 @@ import { VePhoneStatic } from "./type";
 
 declare global {
   interface Window {
-    vePhoneSDK: VePhoneStatic; // VePhone SDK 构造函数
+    // SDK 脚本加载完成后，会把构造函数挂到全局 window 上。
+    vePhoneSDK: VePhoneStatic;
   }
 }
 
 class UMDLoader {
   private static instance: UMDLoader;
+  // loadPromise 用来记住“当前是否已经有人在加载脚本”。
+  // 这样多个地方同时请求 SDK 时，可以复用同一个 Promise，避免重复插入 script 标签。
   private loadPromise: Promise<VePhoneStatic> | null = null;
   private isLoaded = false;
 
@@ -32,23 +35,23 @@ class UMDLoader {
   }
 
   async loadVePhoneSDK(): Promise<VePhoneStatic> {
-    // 如果已经加载，直接返回
+    // 如果 SDK 已经就绪，直接返回全局对象。
     if (this.isLoaded && window.vePhoneSDK) {
       return window.vePhoneSDK;
     }
 
-    // 如果正在加载，返回同一个 Promise
+    // 如果别的地方已经在加载，就直接等待同一个 Promise。
     if (this.loadPromise) {
       return this.loadPromise;
     }
 
-    // 确保在客户端环境
+    // 这个 SDK 依赖浏览器 DOM 和 window，对服务端环境无效。
     if (typeof window === 'undefined') {
       throw new Error('VePhone SDK can only be loaded in client environment');
     }
 
     this.loadPromise = new Promise((resolve, reject) => {
-      // 检查是否已经有脚本标签
+      // 先看看页面里是不是已经有对应 script 标签了。
       const existingScript = document.querySelector('script[src="/vephone-sdk.js"]');
       if (existingScript && window.vePhoneSDK) {
         this.isLoaded = true;
@@ -61,6 +64,7 @@ class UMDLoader {
       script.async = true;
 
       script.onload = () => {
+        // 脚本下载成功后，还要确认它确实把 SDK 挂到了 window 上。
         if (window.vePhoneSDK) {
           this.isLoaded = true;
           console.log('VePhone SDK loaded successfully');
@@ -74,7 +78,7 @@ class UMDLoader {
         reject(new Error('Failed to load VePhone SDK'));
       };
 
-      // 避免重复添加脚本
+      // 只在页面里还没有这个脚本时才真正插入，避免重复下载。
       if (!existingScript) {
         document.head.appendChild(script);
       }
@@ -84,8 +88,9 @@ class UMDLoader {
   }
 
   isSDKLoaded(): boolean {
+    // 双重判断更稳妥：既要标记为已加载，也要真的能从 window 读到 SDK。
     return this.isLoaded && !!window.vePhoneSDK;
   }
 }
 
-export default UMDLoader; 
+export default UMDLoader;

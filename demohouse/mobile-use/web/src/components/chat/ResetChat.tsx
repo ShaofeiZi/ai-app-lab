@@ -25,14 +25,18 @@ import { changeAgentChatThreadId } from "@/lib/cloudAgent"
 
 
 const ResetChat = (props: { className?: string }) => {
+  // 用 loading 状态防止用户在网络请求还没结束时重复点击。
   const [isResetting, setIsResetting] = useState(false)
   const cloudAgent = useCloudAgent()
   const messages = useAtomValue(MessageListAtom)
+
+  // 只有当前存在 thread 且已经有消息时，清空上下文这个动作才有意义。
   const disabled = useMemo(() => {
     return isResetting || !cloudAgent?.threadId || messages.length === 0
   }, [isResetting, cloudAgent?.threadId, messages?.length])
 
   const handleReset = async () => {
+    // 没有活动线程，或者已经在重置中时，不需要重复发请求。
     if (!cloudAgent?.threadId || isResetting) {
       return
     }
@@ -40,17 +44,18 @@ const ResetChat = (props: { className?: string }) => {
     setIsResetting(true)
 
     try {
-      // 调用 reset API
+      // 先取消可能仍在运行的 Agent，避免旧请求和新会话交叉。
       await cloudAgent.cancel().catch(
         (error) => console.error('取消会话失败:', error)
       )
+      // 再向后端申请一个新的 thread_id，真正开始一个“干净”的上下文。
       const data = await fetchAPI('/api/session/reset', {
         method: 'POST',
         body: JSON.stringify({ thread_id: cloudAgent.threadId }),
       }) as SessionBackendResponse
 
       if (data.thread_id) {
-        // 更新 cloudAgent 的 threadId
+        // 前端本地也必须同步新 thread_id，否则后续消息还会打到旧会话上。
         cloudAgent.setThreadId(data.thread_id)
         changeAgentChatThreadId(data.chat_thread_id)
         console.log('会话重置成功:', data.thread_id, data.chat_thread_id)
@@ -58,6 +63,7 @@ const ResetChat = (props: { className?: string }) => {
     } catch (error) {
       console.error('重置会话失败:', error)
     } finally {
+      // 稍微延迟一下再解除 loading，给用户一个明确的操作反馈。
       setTimeout(() => {
         setIsResetting(false)
       }, 500)

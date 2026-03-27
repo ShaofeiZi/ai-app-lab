@@ -17,6 +17,8 @@ const target = url.resolve(process.env.CLOUD_AGENT_BASE_URL || "", 'api/v1/agent
 
 const _post: ApiHandler = async (request: Request, middlewareResult) => {
   const { message, thread_id, pod_id } = await request.json();
+  // 这里固定加上 is_stream: true，告诉下游后端走流式响应模式，
+  // 前端才能实时看到 think / tool 事件。
   const response = await fetchServer(target, middlewareResult, { message, thread_id, pod_id, is_stream: true }, 'POST');
   return response;
 };

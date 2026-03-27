@@ -13,9 +13,10 @@ import { handleVEFaaSError } from "@/app/api/_utils/vefaas";
 import { NextResponse } from "next/server";
 import { APIError } from "../../../lib/exception/apiError";
 import { MiddlewareResult } from "./middleware";
-// 函数重载定义
 
-
+// 这个函数是前端 API 路由层统一使用的“转发器”。
+// 它负责把当前请求携带的用户身份、实例信息和业务参数，
+// 安全地转发给真正处理逻辑的 Cloud Agent 服务。
 export async function fetchServer(
   target: string,
   middlewareResult: MiddlewareResult,
@@ -23,6 +24,7 @@ export async function fetchServer(
   method: string,
   options: { withUserInfo: boolean } = { withUserInfo: false }
 ): Promise<NextResponse> {
+  // 这里统一构造请求头，避免每个 API 路由都重复拼装鉴权信息。
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     'X-Account-Id': middlewareResult.accountId,
@@ -37,20 +39,27 @@ export async function fetchServer(
   });
 
   if (!response.ok) {
+    // 当 HTTP 状态码不是成功时，先把响应体读出来，
+    // 后面才能根据具体错误内容给用户更清晰的提示。
     const errorText = await response.text();
     let errorData;
     try {
       errorData = JSON.parse(errorText);
     } catch (e) {
-      // JSON解析失败，直接使用文本
+      // 某些异常场景返回的并不是 JSON，而是一段普通字符串。
+      // 这时直接保留原始文本，避免再次解析报错。
       errorData = { message: errorText };
     }
 
+    // 先交给平台错误适配器做一次“翻译”，
+    // 再把剩余错误继续抛给上层。
     await handleVEFaaSError(errorData, response.status);
     throw new Error(`请求失败: errorData.message: ${errorData.message}  errorData.status: ${response.status}`);
   }
 
   if (response.headers.get('Content-Type') === 'text/event-stream') {
+    // 如果后端返回的是 SSE 事件流，就要原样把流透传给浏览器，
+    // 这样前端才能边接收边渲染模型思考过程和工具调用结果。
     return new NextResponse(response.body, {
       headers: {
         'Content-Type': 'text/event-stream',
@@ -62,12 +71,17 @@ export async function fetchServer(
     });
   }
 
+  // 普通接口返回的是完整 JSON，可以一次性解析成对象。
   const json = await response.json();
   if (json?.error && json?.error?.code !== 0) {
+    // 有些业务错误会放在 JSON 里的 error 字段中，
+    // 即使 HTTP 成功，也要继续按失败处理。
     throw new APIError(json.error.code, json.error.message);
   }
 
   if (options.withUserInfo) {
+    // 某些场景希望把当前用户信息一起返回给前端，
+    // 例如重置会话后顺手刷新页面展示用的用户资料。
     return NextResponse.json({
       userInfo: {
         accountId: middlewareResult.accountId,
@@ -83,6 +97,7 @@ export async function fetchServer(
     });
   }
 
+  // 默认情况下直接返回业务 JSON，并透传实例名给前端维持会话亲和性。
   return NextResponse.json(
     options.withUserInfo ? {
       userInfo: {

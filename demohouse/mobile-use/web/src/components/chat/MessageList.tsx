@@ -23,7 +23,10 @@ const MessageList: React.FC<MessageListProps> = ({ messages }) => {
   return (
     <div className="space-y-2">
       {messages.map((message, idx) => {
-        // 如果是用户消息，直接显示
+        // 当前列表里混合了两种消息：
+        // 1. 用户自己发出的普通文本
+        // 2. Agent 返回的执行过程消息
+        // 这里按 isUser 做最外层分流。
         if (message.isUser) {
           return <UserMessage key={message.id} message={message} />;
         } else {

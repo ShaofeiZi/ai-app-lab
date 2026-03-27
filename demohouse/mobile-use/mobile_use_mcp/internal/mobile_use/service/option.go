@@ -12,6 +12,8 @@
 package service
 
 type mobileUseOption struct {
+	// 这里收拢的是 provider 运行所需的全部参数。
+	// 之所以不直接把一长串参数塞进构造函数，是为了让调用方按需组合，更清楚也更容易扩展。
 	AccessKey       string
 	SecretKey       string
 	SessionToken    string
@@ -29,6 +31,7 @@ type mobileUseOption struct {
 type Option func(*mobileUseOption)
 
 func defaultMobileUseOption() *mobileUseOption {
+	// 先给出一份默认配置，再由多个 WithXxx 函数逐步覆盖。
 	return &mobileUseOption{
 		AccessKey:    "",
 		SecretKey:    "",
@@ -38,6 +41,7 @@ func defaultMobileUseOption() *mobileUseOption {
 }
 
 func WithAccessKey(accessKey string) Option {
+	// Option 模式的核心思想是：返回一个“会修改配置对象的函数”。
 	return func(option *mobileUseOption) {
 		option.AccessKey = accessKey
 	}

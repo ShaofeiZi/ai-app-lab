@@ -18,6 +18,10 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 )
 
+// NewTerminateTool 声明“终止当前任务”的工具。
+//
+// reason 被设计成必填参数，
+// 是为了让这次终止操作至少留下一条明确原因，方便日志排查和上层展示。
 func NewTerminateTool() mcp.Tool {
 	return mcp.NewTool("terminate",
 		mcp.WithDescription("Terminate the current task"),
@@ -28,6 +32,12 @@ func NewTerminateTool() mcp.Tool {
 	)
 }
 
+// HandleTerminate 处理 terminate 请求。
+//
+// 和其他工具不同的是，这里当前实现不会调用 service 层去停止某个真实后台任务，
+// 而是在鉴权和参数校验通过后，直接返回一条确认文本。
+// 这意味着它现在更像一个“终止意图确认接口”，而不是完整的任务中断实现。
+// 本次只把这一点解释清楚，不改变既有行为。
 func HandleTerminate() func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		err := CheckAuth(ctx)
@@ -46,6 +56,9 @@ func HandleTerminate() func(context.Context, mcp.CallToolRequest) (*mcp.CallTool
 		if !ok || reason == "" {
 			return CallResultError(fmt.Errorf("reason is required"))
 		}
+
+		// 成功结果里直接回显终止原因，
+		// 方便调用方在界面或日志里立即看到这次终止是为什么发生的。
 		return CallResultSuccess(fmt.Sprintf("Task terminated: %s", reason))
 	}
 }

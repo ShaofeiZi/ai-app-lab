@@ -76,16 +76,18 @@ export const useCloudAgentInit = () => {
   const saveMessageList = useSetAtom(saveMessageListAtom);
 
   useEffect(() => {
-    // 将消息处理逻辑移到 hook 内部
+    // 这个 hook 负责把“后端推来的 SSE 事件”翻译成“前端消息列表状态”。
+    // 页面组件只负责渲染，不需要自己理解 SSE 的细节。
     const handleSSEMessage = (json: SSEMessage) => {
       setMessageList((pre: Message[]) => {
-        // 查找是否有相同task_id的消息
+        // 一个 task_id 对应 Agent 的一次完整执行过程。
+        // 因此前端会把同一 task_id 的 think / tool / summary 事件收拢到同一条 ThinkingMessage 下。
         let thinkingMessage = pre.find(message => 'taskId' in message && message.taskId === json.task_id) as
           | ThinkingMessage
           | undefined;
 
         if (!thinkingMessage) {
-          // 创建新的ThinkingMessage
+          // 第一次收到这个 task_id 的事件时，先搭一个空壳消息容器。
           thinkingMessage = {
             id: json.task_id,
             isFinish: false,
@@ -103,13 +105,13 @@ export const useCloudAgentInit = () => {
 
         switch (json.type) {
           case 'think':
-            // 查找或创建ThinkStep
+            // think 事件可能是流式分段到达的，所以需要按 step id 增量拼接 content。
             let thinkStep = thinkingMessage.steps.find(step => step.type === 'think' && step.id === json.id) as
               | ThinkStep
               | undefined;
 
             if (!thinkStep) {
-              // 不存在相同id的ThinkStep，创建新的
+              // 第一次见到这个 step，就先创建一个空内容步骤。
               thinkStep = {
                 id: json.id,
                 taskId: json.task_id,
@@ -123,6 +125,7 @@ export const useCloudAgentInit = () => {
             thinkStep.content = `${thinkStep.content}${json.content}`.replaceAll('\\n', '\n');
             break;
           case 'user_interrupt':
+            // user_interrupt 代表 Agent 想向用户补充提问或等待用户提供信息。
             const newUserInterruptStep: UserInterruptStep = {
               id: json.id,
               taskId: json.task_id,
@@ -134,13 +137,14 @@ export const useCloudAgentInit = () => {
             thinkingMessage.steps.push(newUserInterruptStep);
             break;
           case 'tool':
-            // 查找与当前工具调用相同ID的ThinkStep
+            // tool 事件会附着在某个 think step 上，
+            // 这样页面既能显示“模型想了什么”，也能显示“它随后调用了什么工具”。
             let thinkStepForTool = thinkingMessage.steps.find(step => step.type === 'think' && step.id === json.id) as
               | ThinkStep
               | undefined;
 
             if (!thinkStepForTool) {
-              // 如果不存在相同ID的ThinkStep，创建新的
+              // 有些时候工具事件可能先于完整 think 文本到达，因此这里也允许先建壳。
               thinkStepForTool = {
                 id: json.id,
                 taskId: json.task_id,
@@ -157,7 +161,7 @@ export const useCloudAgentInit = () => {
               };
               thinkingMessage.steps.push(thinkStepForTool);
             } else {
-              // 如果存在相同ID的ThinkStep，更新或添加toolCall
+              // 同一工具调用的 start / success / stop 事件会逐步把 toolCall 信息补全。
               thinkStepForTool.toolCall = {
                 ...(thinkStepForTool.toolCall || {}),
                 toolId: json.tool_id,
@@ -170,7 +174,7 @@ export const useCloudAgentInit = () => {
             }
             break;
           case 'summary':
-            // 更新summary内容
+            // summary 也是可流式拼接的，所以这里同样按 task 内单独累积。
             if (!thinkingMessage.summary) {
               // 如果summary不存在，创建新的
               const newSummary: Summary = {
@@ -191,7 +195,7 @@ export const useCloudAgentInit = () => {
         }
 
         const updatedMessages = [...pre];
-        // 触发保存到 sessionStorage
+        // 状态更新后异步触发一次持久化，避免刷新页面丢失过程消息。
         setTimeout(() => saveMessageList(), 0);
         return updatedMessages;
       });
@@ -201,7 +205,8 @@ export const useCloudAgentInit = () => {
       console.log('handleSSEDone');
       setMessageList((pre: Message[]) => {
         console.log('done');
-        // 找到最后一条未完成的消息，将其标记为已完成
+        // DONE 事件的语义是：“当前任务的流结束了”。
+        // 因此前端会把最后一条未完成消息标记成完成态，按钮和 loading 也能据此恢复。
         const lastUnfinishedIndex = pre.findLastIndex(msg => !msg.isFinish);
         if (lastUnfinishedIndex >= 0) {
           const updatedMessages = [...pre];
@@ -217,12 +222,13 @@ export const useCloudAgentInit = () => {
       });
     };
 
+    // CloudAgent 封装了浏览器侧的 SSE 调用与取消逻辑。
     const agent = new CloudAgent();
     agent.onMessage(handleSSEMessage);
     agent.onMessageDone(handleSSEDone);
     setCloudAgent(agent);
 
-    // 清理函数
+    // 组件卸载时把监听器解绑，防止旧页面继续响应新事件。
     return () => {
       // 清理事件监听器
       agent.offMessage();

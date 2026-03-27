@@ -46,6 +46,8 @@ type mobileUseImpl struct {
 }
 
 func NewMobileUseImpl(options ...Option) MobileUseProvider {
+	// Provider 是真正执行云手机操作的实现层。
+	// 所有工具最后都会汇聚到这个对象的方法上。
 	mobileUseOption := defaultMobileUseOption()
 	for _, option := range options {
 		option(mobileUseOption)
@@ -75,6 +77,8 @@ func NewMobileUseImpl(options ...Option) MobileUseProvider {
 }
 
 func (impl *mobileUseImpl) ScreenShot(ctx context.Context) (*ScreenShotResult, error) {
+	// 截图不是直接从函数里返回图片字节，
+	// 而是先在云端执行命令，把结果上传到 TOS，再解析出可访问的截图地址。
 	tosConfig := TosConfig{
 		AccessKey:    impl.option.TosAccessKey,
 		SecretKey:    impl.option.TosSecretKey,
@@ -122,11 +126,14 @@ func (impl *mobileUseImpl) ScreenSwipe(ctx context.Context, fromX, fromY, toX, t
 }
 
 func (impl *mobileUseImpl) InputText(ctx context.Context, text string) error {
+	// 先切换输入法，再输入文本。
+	// 这是因为不少云手机环境里，直接注入文本前需要先确保目标输入法已经激活。
 	command := consts.ACEPSelectInputMethod
 	_, err := impl.runSyncCommand(ctx, command, consts.ACEPCommandTypeShell)
 	if err != nil {
 		return err
 	}
+	// 文本先做 base64 编码，可以减少命令行中因为空格、引号或特殊字符导致的问题。
 	safeText := base64.StdEncoding.EncodeToString([]byte(text))
 
 	inputText := fmt.Sprintf(consts.ACEPInputTextFormat, safeText)
@@ -160,6 +167,7 @@ func (impl *mobileUseImpl) KeyEvent(ctx context.Context, KeyEventType string) er
 }
 
 func (impl *mobileUseImpl) AutoInstallApp(ctx context.Context, downloadUrl string) error {
+	// 安装应用走的是云手机平台提供的高层 API，而不是自己拼 shell 命令下载 APK。
 	request := &acep.AutoInstallAppBody{
 		ProductID:   impl.option.ProductID,
 		PodIDList:   []string{impl.option.DeviceID},
@@ -205,6 +213,8 @@ func (impl *mobileUseImpl) CloseApp(ctx context.Context, packageName string) err
 }
 
 func (impl *mobileUseImpl) ListApps(ctx context.Context) (appItems []AppItem, err error) {
+	// 云接口返回的是平台字段名，前端更关心的是统一后的应用列表结构，
+	// 所以这里顺手做一层转换。
 	request := &acep.GetPodAppListQuery{
 		ProductID: impl.option.ProductID,
 		PodID:     impl.option.DeviceID,
@@ -239,6 +249,8 @@ func (impl *mobileUseImpl) ListApps(ctx context.Context) (appItems []AppItem, er
 }
 
 func (impl *mobileUseImpl) runSyncCommand(ctx context.Context, command string, user string) (*string, error) {
+	// 对“点击、滑动、按键、文本输入”等低层动作来说，
+	// 统一走 RunSyncCommand 可以把执行路径收敛到一个地方，方便复用和校验返回结果。
 	request := &acep.RunSyncCommandBody{
 		ProductID:      impl.option.ProductID,
 		PodIDList:      []string{impl.option.DeviceID},

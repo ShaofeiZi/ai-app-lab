@@ -38,7 +38,8 @@ class SessionState(BaseModel):
     model_config = {"arbitrary_types_allowed": True}
 
     account_id: str
-    # agent chat 上下文id
+    # Agent 内部对话历史使用的上下文 ID。
+    # reset 会重置它，但不一定重置外层 thread_id。
     chat_thread_id: str
     pod_session_expired_time: int  # pod剩余时间（秒）
     # podid
@@ -56,7 +57,7 @@ class SessionState(BaseModel):
     tos_bucket: str
     tos_region: str
     tos_endpoint: str
-    # 添加时间戳用于过期检查
+    # 下面这些时间戳不是给前端看的，而是给服务端自己做过期清理用的。
     created_at: float = None
     last_accessed_at: float = None
     pod_updated_at: float = None  # pod信息最后更新时间
@@ -80,6 +81,8 @@ class SessionManager:
     thread_map: Dict[str, SessionState]  # session_id -> thread_chat_id
 
     def __init__(self, session_timeout: int = 60 * 60 * 2):  # 默认2小时超时
+        # thread_map 是整个服务内存中的会话总表。
+        # key 是 thread_id，value 是这个会话当前绑定的 pod、token、倒计时等信息。
         self.thread_map = {}
         self.session_timeout = session_timeout  # 会话超时时间（秒）
         self.last_cleanup_time = time.time()
@@ -92,7 +95,9 @@ class SessionManager:
         """
         current_time = time.time()
 
-        # 如果距离上次清理时间不够，跳过清理
+        # 这是“懒清理”策略：
+        # 不是单独起后台定时任务，而是在用户下次访问时顺手检查一下。
+        # 对这种 demo 服务来说实现更简单，也够用。
         if current_time - self.last_cleanup_time < self.cleanup_interval:
             return
 
@@ -100,7 +105,8 @@ class SessionManager:
         expired_threads = []
 
         for thread_id, session in self.thread_map.items():
-            # 检查是否超过了pod过期时间（pod_updated_at + pod_session_expired_time）
+            # 优先按照 pod 剩余可用时间判断。
+            # 因为云手机实例本身过期后，即使本地会话还在，也已经没有可操作的真实资源了。
             if session.pod_session_expired_time > 0:
                 pod_expire_time = (
                     session.pod_updated_at + session.pod_session_expired_time
@@ -115,7 +121,7 @@ class SessionManager:
                     )
                     continue
 
-            # 检查是否超过了会话超时时间（基于最后访问时间）
+            # 如果 pod 还没过期，再看会话是否太久没人访问。
             if current_time - session.last_accessed_at > self.session_timeout:
                 expired_threads.append(thread_id)
                 logger.info(f"Session {thread_id} expired due to inactivity timeout")
@@ -133,7 +139,7 @@ class SessionManager:
             logger.info(f"Cleaned up {len(expired_threads)} expired sessions")
 
     def _update_last_accessed(self, thread_id: str):
-        """更新会话的最后访问时间"""
+        """更新会话的最后访问时间。"""
         if thread_id not in self.thread_map:
             logger.debug(f"Thread {thread_id} not found, skipping update last accessed")
             return
@@ -156,9 +162,10 @@ class SessionManager:
 
     # 获取会话状态
     def get_thread_state(self, thread_id: str) -> SessionState:
-        # 执行懒检查
+        # 每次读取会话前都顺手做两件事：
+        # 1. 清一遍可能已经过期的旧会话；
+        # 2. 刷新当前会话的最后访问时间。
         self._lazy_cleanup_expired_sessions()
-        # 更新最后访问时间
         self._update_last_accessed(thread_id)
         return self.thread_map[thread_id]
 
@@ -177,6 +184,8 @@ class SessionManager:
         auth_info: Dict[str, Any],
         # tos_info: Dict[str, Any],
     ):
+        # update_thread_state 用于“会话还在，但 pod 的实时信息需要刷新”的场景，
+        # 比如前端刷新页面后重新请求 create_session。
         session = self.thread_map[thread_id]
         current_time = time.time()
         self.thread_map[thread_id] = session.model_copy(
@@ -221,6 +230,8 @@ class SessionManager:
         auth_info: Dict[str, Any],  # 授权信息
         # tos_info: Dict[str, Any] = None,  # tos 信息
     ):
+        # create_thread 会把云手机信息、鉴权信息和 TOS 信息统一装进 SessionState，
+        # 之后 agent 路由就只需要拿 thread_id 去查，不用重复向外部系统要这些信息。
         session = SessionState(
             account_id=account_id,
             chat_thread_id=str(uuid.uuid4()),
@@ -251,6 +262,7 @@ class SessionManager:
         if thread_id not in self.thread_map:
             raise ValueError(f"Thread {thread_id} not found")
 
+        # 先停止旧的 SSE，会让正在执行的任务尽快停掉。
         self.stop_sse_connection(thread_id)
         session = self.update_thread_chat_id(
             thread_id=thread_id, chat_thread_id=new_chat_thread_id

@@ -42,6 +42,7 @@ func HandleTextInput() func(context.Context, mcp.CallToolRequest) (*mcp.CallTool
 		if err != nil {
 			return CallResultError(err)
 		}
+		// 输入文字前先清空已有输入框内容，减少“旧内容残留 + 新内容追加”的问题。
 		err = handler.InputTextClear(ctx)
 		if err != nil {
 			return CallResultError(err)
@@ -50,6 +51,8 @@ func HandleTextInput() func(context.Context, mcp.CallToolRequest) (*mcp.CallTool
 		if err != nil {
 			return CallResultError(err)
 		}
+		// 这里显式取出 text 参数并校验类型，
+		// 因为 MCP 的 arguments 本质上仍是动态 map，不是强类型结构体。
 		text, ok := args["text"].(string)
 		if !ok {
 			return CallResultError(fmt.Errorf("text is required"))

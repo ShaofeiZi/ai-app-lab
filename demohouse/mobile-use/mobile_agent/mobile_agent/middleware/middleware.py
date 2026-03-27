@@ -28,7 +28,8 @@ class AuthMiddleware(BaseHTTPMiddleware):
     """账户鉴权中间件"""
 
     async def dispatch(self, request: Request, call_next):
-        # 获取账户ID
+        # 这里读取的是外层网关或调用方传进来的账户标识。
+        # 后续所有业务路由都依赖它做“这个会话属于谁”的校验。
         account_id = request.headers.get("X-Account-Id")
         faas_instance_name = request.headers.get("x-faas-instance-name")
         logger.info(f"账户ID: {account_id}，FaaS实例名称: {faas_instance_name}")
@@ -40,7 +41,8 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 message="账户ID不存在，鉴权失败",
             )
 
-        # 将账户ID绑定到请求状态中
+        # request.state 可以理解成“本次请求专属的临时存储区”。
+        # 这样后面的路由就不用一层层传 account_id 了。
         request.state.account_id = account_id
 
         # 继续处理请求
@@ -68,23 +70,26 @@ class ResponseMiddleware(BaseHTTPMiddleware):
 
     async def dispatch(self, request: Request, call_next) -> Response:
         try:
-            # 调用下一个中间件或路由处理函数
+            # 先让真正的路由逻辑运行，拿到它原始返回的 Response。
             response = await call_next(request)
 
-            # 如果是流式响应或其他非JSON响应，直接返回
+            # SSE 事件流不是普通 JSON，不能再包一层 result/error，
+            # 否则前端就无法按事件流协议解析了。
             if not isinstance(response, JSONResponse):
                 return response
 
-            # 获取原始响应数据
+            # 这里把 JSONResponse 的 body 取出来，判断它是不是已经包装好的格式。
             response_body = json.loads(response.body.decode())
 
-            # 如果响应已经是格式化后的数据，直接返回
+            # 某些路由或异常处理逻辑本身已经返回了标准结构，
+            # 再包装一次就会变成 result.result 这种难看的嵌套。
             if isinstance(response_body, dict) and (
                 "result" in response_body or "error" in response_body
             ):
                 return response
 
-            # 包装成功响应
+            # 普通成功响应统一包成 {"result": ..., "error": {"code": 0, ...}}，
+            # 这样前端不需要分别处理很多种返回格式。
             return JSONResponse(
                 content=wrap_response_data(response_body),
                 status_code=response.status_code,
@@ -92,7 +97,8 @@ class ResponseMiddleware(BaseHTTPMiddleware):
             )
 
         except APIException as api_error:
-            # 处理自定义API异常
+            # APIException 代表“业务上可预期的失败”，
+            # 例如参数不对、会话不存在，而不是程序崩溃。
             logger.warning(f"业务报错: {api_error}")
 
             return JSONResponse(
@@ -102,7 +108,7 @@ class ResponseMiddleware(BaseHTTPMiddleware):
             )
 
         except Exception as e:
-            # 记录未知异常
+            # 剩下的异常都按未知错误处理，并保留日志方便排查。
             logger.exception(f"请求处理异常: {e}")
 
             # 包装错误响应

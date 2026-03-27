@@ -25,13 +25,17 @@ from mobile_agent.agent.memory.saver import checkpointer
 
 def create_mobile_agent():
     """创建代理"""
-    # 创建状态图
+    # 这里定义的是一个最核心的“观察 -> 思考 -> 校验动作 -> 执行动作”的循环图。
+    # 可以把它想成一个状态机：每个节点负责一步，边负责决定下一步去哪里。
     workflow = StateGraph(MobileUseAgentState)
 
     workflow.add_node("prepare", prepare_node)
     workflow.set_entry_point("prepare")  # 设置入口节点
 
-    # 添加三个核心节点
+    # prepare 负责把上下文准备好；
+    # model 负责让大模型基于最新页面决定下一步；
+    # tool_valid 负责把模型输出的动作文字解析、校验；
+    # tool 负责真的对云手机执行动作。
     workflow.add_node("model", model_node)  # 大模型节点，计算action和tool
     workflow.add_node("tool_valid", tool_valid_node)  # 工具验证节点
     workflow.add_node("tool", tool_node)  # 工具执行节点
@@ -40,7 +44,10 @@ def create_mobile_agent():
     workflow.add_edge("prepare", "model")
     workflow.add_edge("model", "tool_valid")
 
-    # 设置条件边
+    # tool_valid 之后有三种可能：
+    # 1. 解析成功并且是普通工具，继续执行 tool。
+    # 2. 解析出结束类工具，说明任务可以结束。
+    # 3. 解析失败，回到 model 重新生成动作。
     workflow.add_conditional_edges(
         "tool_valid",
         should_tool_exec_continue,
@@ -55,12 +62,12 @@ def create_mobile_agent():
         "tool",
         should_react_continue,
         {
-            "continue": "model",  # 继续下一轮
+            "continue": "model",  # 工具做完后重新观察页面，进入下一轮
             "finish": END,  # 任务完成
         },
     )
 
-    # 编译状态图
+    # compile 之后得到的 graph 才是可以真正运行的可执行对象。
     return workflow.compile(name="mobile_use_agent", checkpointer=checkpointer)
 
 

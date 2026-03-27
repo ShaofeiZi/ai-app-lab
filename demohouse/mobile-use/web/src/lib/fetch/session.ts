@@ -9,13 +9,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Session亲和性管理工具
+// 这个文件负责管理“前端请求应该继续打到哪个 FaaS 实例”。
+// 对初学者来说，可以把它理解成一种“会话粘性”机制：
+// 只要当前聊天还在继续，后续请求最好落到同一个后端实例，
+// 这样上下文、缓存和长连接状态更稳定。
 
 const FAAS_INSTANCE_KEY = 'mobile_use:agent_faas_instance_name';
 
 export class SessionAffinityManager {
   /**
-   * 获取当前存储的FaaS实例名称
+   * 获取当前浏览器里保存的 FaaS 实例名。
+   * 如果是在服务端环境调用，这里拿不到 sessionStorage，只能返回 null。
    */
   static getFaasInstanceName(): string | null {
     if (typeof window !== 'undefined') {
@@ -25,7 +29,8 @@ export class SessionAffinityManager {
   }
 
   /**
-   * 存储FaaS实例名称
+   * 把本次请求命中的实例名保存到 sessionStorage。
+   * 这样同一个标签页后续发请求时，就可以继续沿用同一个实例。
    */
   static setFaasInstanceName(instanceName: string): void {
     if (typeof window !== 'undefined') {
@@ -35,7 +40,8 @@ export class SessionAffinityManager {
   }
 
   /**
-   * 清除FaaS实例名称
+   * 清除实例绑定关系。
+   * 一般在会话结束、重置或发生需要重新分配实例的场景使用。
    */
   static clearFaasInstanceName(): void {
     if (typeof window !== 'undefined') {
@@ -45,17 +51,17 @@ export class SessionAffinityManager {
   }
 
   /**
-   * 检查是否有活跃的session亲和性
+   * 判断当前是否已经记录了活跃实例。
    */
   static hasActiveSession(): boolean {
     return this.getFaasInstanceName() !== null;
   }
 
   /**
-   * 重置session（清除所有相关数据）
+   * 重置与 session 亲和性相关的本地状态。
    */
   static resetSession(): void {
     this.clearFaasInstanceName();
-    // 可以在这里添加其他需要清除的session相关数据
+    // 如果未来还有其他“会话绑定”信息，也可以在这里一起清掉。
   }
 }

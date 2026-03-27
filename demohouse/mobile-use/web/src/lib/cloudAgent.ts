@@ -30,6 +30,8 @@ class CloudAgent {
   private _productId?: string;
 
   constructor() {
+    // CloudAgent 是浏览器里“和后端 Agent 打交道”的总入口。
+    // 它会记住 threadId、chatThreadId、podId、productId，并负责发起 SSE 请求。
     this._ready = false;
     this._threadId = sessionStorage.getItem(MOBILE_USE_THREAD_ID_KEY) || undefined;
     this._chatThreadId = sessionStorage.getItem(MOBILE_USE_CHAT_THREAD_ID_KEY) || undefined
@@ -60,6 +62,8 @@ class CloudAgent {
   }
 
   setProductPodId(productId: string, podId: string) {
+    // productId / podId 既存在内存里，也持久化到 localStorage，
+    // 这样刷新页面后还能恢复最近一次操作的云手机目标。
     this._productId = productId;
     this._podId = podId;
     localStorage.setItem(MOBILE_USE_PRODUCT_ID_KEY, productId);
@@ -83,6 +87,7 @@ class CloudAgent {
   }
 
   closeConnection() {
+    // AbortController 是浏览器里取消 fetch / SSE 的标准办法。
     if (this._abortController) {
       this._abortController.abort();
       this._abortController = undefined;
@@ -94,6 +99,7 @@ class CloudAgent {
       throw new Error('podId is required');
     }
 
+    // 新任务开始前先关掉上一条还没彻底结束的连接，避免两个事件流混在一起。
     this.closeConnection();
 
     this._abortController = new AbortController();
@@ -112,6 +118,8 @@ class CloudAgent {
   }
 
   private async _call(message: string) {
+    // 这里请求的是浏览器侧的 `/api/agent/stream`，
+    // 实际上它还会再转发到 Python Agent 服务。
     const readable = await fetchSSE(`/api/agent/stream`, {
       method: 'POST',
       body: JSON.stringify({
@@ -127,7 +135,8 @@ class CloudAgent {
 
     let buffer = '';
 
-    // 处理流数据
+    // SSE 的底层是不断到达的文本块。
+    // 这里自己做一层按 `\n\n` 分帧，再把 `data: ...` 解析成结构化事件。
     try {
       // eslint-disable-next-line no-constant-condition
       while (true) {
@@ -137,7 +146,7 @@ class CloudAgent {
           break;
         }
 
-        // 将二进制数据转换为文本
+        // fetch 返回的是 Uint8Array，需要先解码成字符串再做切分。
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split('\n\n');
         buffer = lines.pop() || '';
@@ -170,6 +179,7 @@ class CloudAgent {
     if (!this._threadId) {
       throw new Error('threadId is required');
     }
+    // 本地先中断连接，再通知后端停止执行。
     this.closeConnection()
     await fetchAPI(`/api/agent/cancel`, {
       method: 'POST',
@@ -180,6 +190,7 @@ class CloudAgent {
   }
 
   private _onMessage(data: `data: ${string}`) {
+    // "[DONE]" 是约定好的流结束标记，不再走 JSON 解析分支。
     const jsonStr = data.split('data: ')[1];
     if (jsonStr === '[DONE]') {
       (this.handler.get(EVENT_KEY.DONE) as MapKey[typeof EVENT_KEY.DONE])?.();
@@ -214,6 +225,8 @@ export const changeAgentChatThreadId = (chatThreadId: string) => {
   const cloudAgent = store.get(cloudAgentAtom)
   if (cloudAgent) {
     if (cloudAgent.chatThreadId === chatThreadId) { return }
+    // chatThreadId 变化代表“换了一段新的对话上下文”，
+    // 原来的消息列表就不应该继续沿用。
     store.set(MessageListAtom, [])
     cloudAgent.setChatThreadId(chatThreadId)
   }

@@ -46,14 +46,18 @@ const ChatPanel: React.FC = () => {
   const saveMessageList = useSetAtom(saveMessageListAtom);
   const initMessageStatus = useAtomValue(initMessageStatusAtom)
 
-  // 在组件初始化时加载历史消息
+  // 如果当前 chatThreadId 对应的历史消息已经存在于 sessionStorage，
+  // 这里会把它恢复出来，避免刷新页面后聊天区变空。
   useEffect(() => {
     if (cloudAgent?.threadId) {
       initMessageList();
     }
   }, [cloudAgent?.threadId, initMessageList]);
 
-  // 初始化时检查是否有历史消息，决定初始模式
+  // welcome / chat / init 三种模式的意义：
+  // init: 还没决定该显示什么；
+  // welcome: 没有历史消息，显示欢迎与样例任务；
+  // chat: 已经有消息，直接进入对话界面。
   useEffect(() => {
     if (chatMode !== 'init' || initMessageStatus === false) {
       return
@@ -65,7 +69,7 @@ const ChatPanel: React.FC = () => {
     }
   }, [messages, chatMode, initMessageStatus]);
 
-  // 在消息更新时保存到 sessionStorage
+  // 只要消息变了，就尽量持久化，保证刷新后能恢复上下文。
   useEffect(() => {
     if (messages.length > 0 && cloudAgent?.threadId) {
       saveMessageList();
@@ -74,6 +78,8 @@ const ChatPanel: React.FC = () => {
 
 
   const appendUserMessage = (message: string) => {
+    // 用户消息先本地落一条，这样界面能立刻反馈“发送成功”，
+    // 不需要等后端真正开始流式返回后才看到自己刚输入的内容。
     const newMessage: ChatMessage = {
       id: `${Date.now()}`,
       content: message,
@@ -87,6 +93,7 @@ const ChatPanel: React.FC = () => {
   };
 
   const handleCancel = async () => {
+    // 取消按钮会通知后端停止当前任务，并把本地按钮状态切到“取消中”。
     setCanceling(true);
     await cloudAgent?.cancel();
     setCanceling(false);
@@ -95,6 +102,7 @@ const ChatPanel: React.FC = () => {
   const handleSendMessage = async (text: string) => {
     if (text.trim() === "") return;
 
+    // 发送流程是“先追加用户消息，再发起 agent 调用”。
     appendUserMessage(text);
     setCalling(true);
     try {
@@ -105,19 +113,20 @@ const ChatPanel: React.FC = () => {
   };
 
   const handleRetry = () => {
-    // 清空 threadId， 再次体验
+    // 超时后重新体验时，最简单稳定的做法是：
+    // 清空 threadId 和会话数据，然后整页刷新，从首页重新开始。
     cloudAgent?.setThreadId("");
     // 清空会话数据
     setSessionData(null);
     window.location.reload();
   };
 
-  // 根据状态渲染不同的视图
+  // 超时状态优先级最高，只要体验时间结束，就不再显示正常聊天区。
   if (timeoutState !== "active") {
     return <TimeoutView timeoutState={timeoutState} onRetry={handleRetry} />;
   }
 
-  // 根据明确的模式状态来决定显示哪个视图
+  // 根据模式切换欢迎页或聊天页。
   if (chatMode === 'chat') {
     return (
       <>

@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)
 
 class MCPHub:
     def __init__(self, mcp_json: dict = None):
+        # mcp_json 可以理解成“有哪些 MCP 服务、它们各自怎么连接”的配置表。
         self.mcp_json = mcp_json or {}
         self.create_client()
         self.exit_stack: AsyncExitStack = AsyncExitStack()
@@ -39,12 +40,14 @@ class MCPHub:
         self.create_client()
 
     def create_client(self):
+        # 如果当前还没有任何 MCP 服务配置，就先不创建客户端。
         if not self.mcp_json:
             return
 
         self.client = MultiServerMCPClient(self.mcp_json)
 
     async def create_all_sessions(self):
+        # 某些场景下可以一次把所有 server 的 session 都建好，减少第一次调用时的等待。
         tasks = []
         for key in self.mcp_json:
             task = asyncio.create_task(self.session(key))
@@ -52,6 +55,8 @@ class MCPHub:
         await asyncio.gather(*tasks)
 
     async def session(self, key: str):
+        # session 会被缓存起来。
+        # 这样同一个 MCP server 不需要每次 call_tool 都重新握手连接。
         if key in self.sessions:
             return self.sessions[key]
 
@@ -71,11 +76,14 @@ class MCPHub:
             self.sessions = {}
 
     async def call_tool(self, mcp_server_name: str, name: str, arguments: dict):
+        # 先确保拿到对应 server 的 session，再真正执行工具调用。
         session = await self.session(mcp_server_name)
         if not session:
             raise ValueError("MCP session is not valid")
 
         response = await session.call_tool(name, arguments)
+        # MCP 调用成功并不代表业务一定成功，
+        # 这里还会检查返回内容是否是预期的 text，是否包含明显错误信号。
         if not self.is_valid_mcp_response(response):
             text_content = (
                 response.content[0].text
@@ -92,7 +100,7 @@ class MCPHub:
         if len(result.content) == 0:
             return False
 
-        # 当前阶段只处理 text 类型的
+        # 当前项目只消费 text 类型结果，其他内容类型先一律视为无效。
         if result.content[0].type != "text":
             return False
 
@@ -103,6 +111,7 @@ class MCPHub:
         return True
 
     async def get_tools(self, mcp_server_name: str | None = None):
+        # 取工具定义时既可以只取某个 server，也可以一次取全部。
         if mcp_server_name:
             tools = await self.client.get_tools(server_name=mcp_server_name)
         else:

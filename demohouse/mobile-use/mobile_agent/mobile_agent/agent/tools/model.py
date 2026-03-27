@@ -14,11 +14,26 @@ from pydantic import BaseModel
 
 
 class ToolFunction(BaseModel):
+    """
+    这是工具调用里真正的“函数描述”部分。
+
+    可以把它理解成：
+    - `name` 说明要调用哪个工具
+    - `arguments` 是传给这个工具的参数，通常是 JSON 字符串
+    """
+
     name: str
     arguments: str
 
 
 class ToolCall(BaseModel):
+    """
+    这是和 OpenAI / LangChain 工具调用格式对齐的数据模型。
+
+    Agent 在“模型产出动作”与“本地真正执行工具”之间，需要一个统一的数据载体。
+    这个类就是那层中间表示，方便不同模块用同一种结构传递工具调用信息。
+    """
+
     id: Optional[str] = None  # 可选字段，当通过提示词做工具调用时可能为空
     type: str
     function: ToolFunction

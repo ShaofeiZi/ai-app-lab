@@ -21,7 +21,12 @@ from mobile_agent.agent.mobile.doubao_action_parser import (
 
 
 class AgentObjectManager:
-    """管理与thread_id相关的不可序列化对象"""
+    """管理与 thread_id 相关的不可序列化对象。
+
+    LangGraph 的状态适合保存字符串、数字、字典这类“容易序列化”的数据。
+    但像 Mobile 客户端、Tools 实例、异步 Event 这些对象不适合直接塞进状态里。
+    因此这里单独维护一个“线程上下文仓库”，用 thread_id 找回这些运行时对象。
+    """
 
     def __init__(self):
         self._contexts: Dict[str, Dict] = {}
@@ -35,7 +40,8 @@ class AgentObjectManager:
         action_parser: DoubaoActionSpaceParser,
         cost_calculator: CostCalculator,
     ):
-        """为特定thread_id创建上下文"""
+        # 这里存的是本轮执行一定会反复用到的运行时对象。
+        # 后续每个节点只要知道 thread_id，就能把同一套对象取回来继续工作。
         self._contexts[thread_id] = {
             "mobile_client": mobile_client,
             "tools": tools,
@@ -47,6 +53,8 @@ class AgentObjectManager:
     def add_context_object(
         self, thread_id: str, key: Literal["context_manager"], value: ContextManager
     ):
+        # 某些对象不是一开始就准备好，而是在 prepare 阶段才创建。
+        # 这里允许按 key 增量补充到既有上下文里。
         if not self.has_context(thread_id):
             return
         if key in self._contexts[thread_id]:
@@ -72,10 +80,11 @@ class AgentObjectManager:
         return self._contexts.get(thread_id, {}).get("cost_calculator")
 
     def destroy_context(self, thread_id: str):
-        """清理特定thread_id的上下文"""
+        """清理特定 thread_id 的上下文。"""
         if thread_id in self._contexts:
             self._contexts.pop(thread_id)
-            # 暂时没有需要清理的 object
+            # 当前这些对象没有显式 close 逻辑放在这里做，
+            # 真正需要关闭的连接会在更上层例如 agent.aclose() 中处理。
 
     def has_context(self, thread_id: str) -> bool:
         return thread_id in self._contexts

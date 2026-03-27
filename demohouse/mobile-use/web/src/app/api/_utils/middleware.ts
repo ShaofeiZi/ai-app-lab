@@ -23,11 +23,12 @@ export interface MiddlewareResult {
   token: string | null;
 }
 
-// 创建中间件链
+// 统一包装 API handler，把认证、实例亲和和错误格式收敛到一处，
+// 避免每个 route 都重复维护相同的样板代码。
 export function withMiddleware(handler: ApiHandler) {
   return async function (req: NextRequest) {
     try {
-      // 1. 认证中间件
+      // 先跑认证逻辑；失败时直接返回标准 JSON 错误体，不再进入具体业务 handler。
       const authResult = await checkAuth(req);
       if ('error' in authResult && authResult.isError) {
         return NextResponse.json({ error: authResult.error }, { status: 401 });
@@ -38,12 +39,12 @@ export function withMiddleware(handler: ApiHandler) {
       const response = await handler(req, {
         ...authResult,
         authToken: authResult.token,
-        // agent server 亲和性
+        // 将上游网关注入的实例名透传给下游，便于请求继续命中同一 agent 实例。
         faasInstanceName: req.headers.get('x-agent-faas-instance-name'),
       });
       return response
     } catch (error) {
-      // 统一错误处理
+      // 这里统一兜住所有 route 内抛出的异常，保证前端总能收到结构稳定的响应。
       console.error("Response Error:", error)
       if (error && (error instanceof APIError)) {
         console.error("API Error:", error);
@@ -71,7 +72,9 @@ export function withMiddleware(handler: ApiHandler) {
   };
 }
 
-// 认证中间件
+// 当前仓库中的认证逻辑是一个最小示例：
+// 只要求 query string 中带 token，并把它回填为 authToken 供后续调用使用。
+// 如果后续接入真实 IAM，这里会是替换认证实现的主要入口。
 async function checkAuth(req: NextRequest) {
   try {
     const token = req.nextUrl.searchParams.get('token');
@@ -93,6 +96,7 @@ async function checkAuth(req: NextRequest) {
 
 
 function getIAMError(code: string | number, message: string) {
+  // 统一 IAM 风格错误结构，确保鉴权失败与其他调用方的错误处理约定兼容。
   console.error("IAM错误:", code, message);
   return {
     error: {

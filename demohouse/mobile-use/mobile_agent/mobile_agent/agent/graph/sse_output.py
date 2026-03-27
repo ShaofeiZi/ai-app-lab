@@ -23,6 +23,7 @@ from mobile_agent.agent.infra.model import ToolCall
 
 
 def format_sse(data: dict | BaseModel | None = None, **kwargs) -> str:
+    # 统一把字典或 Pydantic 模型编码成 SSE data 行，所有上游节点都通过这一层保持输出格式一致。
     if isinstance(data, BaseModel):
         data = data.model_dump()
     else:
@@ -33,14 +34,14 @@ def format_sse(data: dict | BaseModel | None = None, **kwargs) -> str:
 
 
 def stream_messages(update, is_stream: bool, task_id: str):
-    # 处理字符串类型的消息（GUI代理返回的SSE格式消息）
+    # 某些上游已经产出完整的 SSE 文本，这里直接透传，避免重复编码。
     if isinstance(update, str) and update.startswith("data: "):
-        # 直接返回已经格式化好的SSE消息
         yield update
         return
 
     eventType = update[0]
     if eventType == "custom":
+        # custom 事件约定为“已经准备好的前端消息”，不再做结构化拆分。
         yield update[1]
         return
     elif eventType == "messages":
@@ -54,6 +55,8 @@ def stream_messages(update, is_stream: bool, task_id: str):
                 and metadata.get("langgraph_node") == "model"
                 and message_chunk.type == "AIMessageChunk"
             ):
+                # stream_pipeline 负责把模型的增量 token 聚合成更适合前端展示的 think 片段，
+                # 例如处理 chunk 拼接、去重或节流。
                 pipe_result = stream_pipeline.pipe(
                     id=message_chunk.id,
                     delta=message_chunk.content,
@@ -74,10 +77,12 @@ def stream_messages(update, is_stream: bool, task_id: str):
                 )
         return
     else:
+        # 保留未知事件类型的原始提示，便于调试新的 LangGraph 事件分支。
         yield f"Unknown event type: {eventType}"
 
 
 def get_writer_tool_input(state: MobileUseAgentState, tool_call: ToolCall):
+    # 每次工具调用都生成独立 tool_id，前端可以用它把 start/stop/success 事件串成同一张卡片。
     state.update(current_tool_call_id=str(uuid.uuid4()))
     return format_sse(
         SSEToolCallMessageData(
@@ -98,6 +103,7 @@ def get_writer_tool_output(
 ):
     current_tool_call_id = state.get("current_tool_call_id")
     if current_tool_call_id:
+        # 输出发出后立即清空 current_tool_call_id，避免下一次工具调用错误复用旧 ID。
         state.update(current_tool_call_id="")
 
         return format_sse(
@@ -116,6 +122,7 @@ def get_writer_tool_output(
 
 
 def get_writer_think(state: MobileUseAgentState, chunk_id: str, summary: str):
+    # 非流式模式下会走这里，把模型总结直接包装成 think 消息，保持前端消费协议不变。
     return format_sse(
         SSEThinkMessageData(
             id=chunk_id,

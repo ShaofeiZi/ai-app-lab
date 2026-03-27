@@ -17,6 +17,8 @@ export * from './css';
 import { type ClassValue, clsx } from "clsx"
 import { twMerge } from "tailwind-merge"
 
+// cn 是前端项目里非常常见的样式辅助函数。
+// 它先用 clsx 处理条件 class，再用 twMerge 消除 Tailwind 冲突类名。
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
 }
@@ -30,17 +32,22 @@ export function cn(...inputs: ClassValue[]) {
  */
 export function buildUrlWithToken(path: string, searchParams?: URLSearchParams): string {
   let urlParams: URLSearchParams;
-  
+
   if (searchParams) {
+    // 调用方如果已经把查询参数准备好了，就直接复用。
     urlParams = searchParams;
   } else if (typeof window !== 'undefined') {
+    // 在浏览器里运行时，默认从当前地址栏读取查询参数。
     urlParams = new URLSearchParams(window.location.search);
   } else {
+    // 服务端渲染阶段拿不到 window，这里只能返回原始路径。
     return path;
   }
-  
+
   const token = urlParams.get('token');
   if (token) {
+    // 这里重新构建 URL，而不是直接手写字符串拼接，
+    // 是为了让路径和查询参数处理更稳妥。
     const url = new URL(path, typeof window !== 'undefined' ? window.location.origin : 'http://localhost');
     url.searchParams.set('token', token);
     return url.pathname + url.search;
@@ -54,6 +61,7 @@ export function buildUrlWithToken(path: string, searchParams?: URLSearchParams):
  */
 export function getCurrentToken(): string | null {
   if (typeof window !== 'undefined') {
+    // 只在浏览器里解析地址栏，避免 SSR 阶段访问 window 报错。
     const urlParams = new URLSearchParams(window.location.search);
     return urlParams.get('token');
   }

@@ -15,6 +15,8 @@ import { toastRedirect } from "./redirect";
 import { buildUrlWithToken } from "../utils";
 
 const beforeFetchSessionHeaders = () => {
+  // 这里维护的是“实例亲和性”。
+  // 如果后端是多实例部署，后续请求尽量打到同一实例，可以减少会话不一致问题。
   const faasInstanceName = SessionAffinityManager.getFaasInstanceName();
   if (faasInstanceName) {
     return {
@@ -28,6 +30,8 @@ const afterFetchSession = (response: Response) => {
   const faasInstanceName = SessionAffinityManager.getFaasInstanceName();
   const responseFaasInstanceName = response.headers.get('x-agent-faas-instance-name');
   if (responseFaasInstanceName && responseFaasInstanceName !== faasInstanceName) {
+    // 一旦后端回了新的实例名，就用它覆盖本地记录，
+    // 后续请求会优先继续命中这个实例。
     SessionAffinityManager.setFaasInstanceName(responseFaasInstanceName);
     console.log('存储新的FaaS实例名称:', responseFaasInstanceName);
   }
@@ -37,10 +41,12 @@ const handleErrorResponse = async (response: Response) => {
   const data = await response.json()
   if (data?.error && data?.error?.code !== 0) {
     if (response.status === 401) {
+      // 401 通常意味着 token 缺失或失效，统一走重定向提示。
       toastRedirect()
       return
     }
     if (response.status === 200 && data?.error?.code === 403) {
+      // 这里的 403 是业务语义上的“会话不存在”，不是 HTTP 层拒绝访问。
       toast.warning(data?.error?.message || "会话不存在，请重新开始会话")
       sessionStorage.clear()
       setTimeout(() => {
@@ -60,7 +66,7 @@ const fetchAPI = async (url: string, options: RequestInit) => {
 
     const headers = beforeFetchSessionHeaders();
 
-    // API Auth Key Token - 将 URL token 参数传递给 API
+    // 当前 demo 的鉴权 token 放在页面 URL 上，所以这里要把它继续带给 API route。
     const urlParams = new URLSearchParams(window.location.search);
     const urlToken = urlParams.get('token');
     const apiUrl = urlToken ? `${url}?token=${encodeURIComponent(urlToken)}` : url;
@@ -72,7 +78,7 @@ const fetchAPI = async (url: string, options: RequestInit) => {
         ...options.headers,
       },
     });
-    // 检查响应中是否包含新的FaaS实例名称
+    // 响应回来后再顺手刷新一次实例亲和信息。
     afterFetchSession(response);
     const data = await handleErrorResponse(response)
     return data
@@ -90,7 +96,7 @@ const fetchAPI = async (url: string, options: RequestInit) => {
 const fetchSSE = async (url: string, options: RequestInit) => {
   try {
     const headers = beforeFetchSessionHeaders();
-    // API Auth Key Token - 将 URL token 参数传递给 SSE API
+    // SSE 请求同样要带上 token，否则浏览器侧代理 route 无法通过鉴权中间件。
     const urlParams = new URLSearchParams(window.location.search);
     const urlToken = urlParams.get('token');
     const apiUrl = urlToken ? `${url}?token=${encodeURIComponent(urlToken)}` : url;
@@ -104,6 +110,7 @@ const fetchSSE = async (url: string, options: RequestInit) => {
     });
     afterFetchSession(response);
     if (response.headers.get('Content-Type') === 'text/event-stream') {
+      // 只有真正拿到事件流时，才把 response.body 原样返回给上层逐段读取。
       if (!response.ok || !response.body) {
         const { error } = (await response.json().catch(() => ({ error: { message: '未知错误' } }))) || { error: { message: '未知错误' } };
         toast.warning(error.message);
@@ -115,7 +122,7 @@ const fetchSSE = async (url: string, options: RequestInit) => {
     return data
   } catch (error) {
     console.log(error)
-    // 检查是否为中止错误，如果是则不显示错误提示
+    // 用户主动取消任务时会触发 AbortError，这种情况不应该再弹“网络错误”提示。
     if (error instanceof DOMException && error.name === 'AbortError') {
       console.log('请求已被中止');
       return;

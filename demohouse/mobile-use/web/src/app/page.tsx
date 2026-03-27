@@ -72,7 +72,8 @@ function WelcomePageContent() {
   const [isNavigating, setIsNavigating] = useState(false);
   const { createSession } = useCreateSessionAPI();
 
-  // 初始化表单
+  // 首页的职责很简单：
+  // 收集用户输入的 productId / podId，创建会话，然后跳到聊天页。
   const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
     defaultValues: {
@@ -82,6 +83,8 @@ function WelcomePageContent() {
   });
 
   useEffect(() => {
+    // 如果本地之前记住过 productId / podId，就自动回填到表单里，
+    // 这样用户刷新页面后不需要重新输入。
     form.reset({
       productId: localStorage.getItem(MOBILE_USE_PRODUCT_ID_KEY) || '',
       podId: localStorage.getItem(MOBILE_USE_POD_ID_KEY) || ''
@@ -89,12 +92,13 @@ function WelcomePageContent() {
   }, []);
 
   useEffect(() => {
-    // 如果已经有 threadId，直接进入聊天页面
+    // 如果浏览器里已经存着 threadId，说明之前可能创建过会话。
+    // 这里会尝试恢复它；恢复成功就直接跳到聊天页。
     const checkThreadId = async () => {
       if (cloudAgent?.threadId && !isNavigating) {
         setIsNavigating(true);
         try {
-          // 获取会话数据并存储到全局状态
+          // 重新请求一次 session，目的是拿到最新 pod token、剩余时长等信息。
           const data = await createSession();
           if (!data) {
             return;
@@ -119,6 +123,7 @@ function WelcomePageContent() {
     setIsNavigating(true);
 
     try {
+      // 用户手动输入 productId/podId 后，显式创建一个新会话或刷新旧会话。
       const data = await createSession(values.productId, values.podId);
       if (!data) {
         return;

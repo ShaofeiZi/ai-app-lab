@@ -28,6 +28,7 @@ var (
 )
 
 func init() {
+	// 同一组选项同时支持长参数和短参数，方便本地调试时少敲几个字符。
 	flag.StringVar(&transport, "transport", "stdio", "transport type (stdio,sse,streamable-http)")
 	flag.StringVar(&transport, "t", "stdio", "transport type (stdio,sse,streamable-http)")
 	flag.StringVar(&port, "port", "8080", "mcp server port while serve transport is sse mode")
@@ -39,14 +40,16 @@ func main() {
 	slog.Info("transport", "transport", transport, "port", port)
 	s := server.NewMobileUseServer()
 
-	// Set up signal handling for graceful shutdown
+	// 监听进程退出信号，保证 Ctrl+C 或容器停止时能有机会做优雅关闭。
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
 	// Channel to receive server errors
 	errCh := make(chan error, 1)
 
-	// Start the appropriate server
+	// transport 决定 MCP 服务通过哪种方式对外暴露：
+	// stdio 常用于本地进程集成，
+	// sse 和 streamable-http 更适合网络服务形式。
 	switch transport {
 	case "stdio":
 		if err := s.StartStdio(); err != nil {
@@ -54,6 +57,7 @@ func main() {
 			os.Exit(1)
 		}
 	case "sse":
+		// SSE 模式下既要监听端口，也要告诉 MCP server 自己的 base URL。
 		baseUrl := fmt.Sprintf(":%s", port)
 		if err := s.StartSSEWithServer(fmt.Sprintf(":%s", port), baseUrl); err != nil {
 			slog.Error("Failed to start SSE server", "error", err)
@@ -69,7 +73,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Wait for server completion or signal
+	// WaitForDone 会在服务自然退出或被关闭时返回。
 	go func() {
 		if err := s.WaitForDone(); err != nil {
 			errCh <- err
@@ -79,7 +83,9 @@ func main() {
 		}
 	}()
 
-	// Wait for either a signal or server completion
+	// 主 goroutine 在这里等待两类事件：
+	// 1. 收到操作系统信号；
+	// 2. 服务端自身已经结束。
 	select {
 	case sig := <-sigCh:
 		slog.Info("Received signal, shutting down gracefully", "signal", sig)

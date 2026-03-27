@@ -19,6 +19,8 @@ interface TimeoutPanelProps {
 }
 
 const TimeoutPanel: React.FC<TimeoutPanelProps> = ({ type, onRetry }) => {
+  // 目前虽然只有一种超时场景，但这里仍然用映射表保存配置，
+  // 这样未来新增其他超时类型时，结构不需要重写。
   const content = {
     experienceTimeout: {
       icon: '/30-min-icon.svg',
@@ -27,6 +29,7 @@ const TimeoutPanel: React.FC<TimeoutPanelProps> = ({ type, onRetry }) => {
   };
 
   const onConsult = () => {
+    // 新开标签页跳到官网咨询，避免直接打断当前页面状态。
     window.open('https://www.volcengine.com/contact/product-acep', '_blank');
   };
 
@@ -47,6 +50,7 @@ const TimeoutPanel: React.FC<TimeoutPanelProps> = ({ type, onRetry }) => {
         </Button>
         <Button
           onClick={() => {
+            // 反馈问卷同样走外部链接，便于统一收集体验意见。
             window.open('https://bytedance.larkoffice.com/share/base/form/shrcn0fT1SGEG19AI0ONIIHf3oh', '_blank');
           }}
           variant="outline"
@@ -62,6 +66,7 @@ const TimeoutPanel: React.FC<TimeoutPanelProps> = ({ type, onRetry }) => {
           </div>
         </Button>
         <Button
+          // 重试动作由父组件注入，这样这个面板只负责展示，不绑死具体业务逻辑。
           onClick={onRetry}
           variant="outline"
           className="relative cursor-pointer h-10 px-4 rounded-[10px] overflow-hidden"

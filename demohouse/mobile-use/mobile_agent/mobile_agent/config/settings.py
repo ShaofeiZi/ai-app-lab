@@ -20,6 +20,8 @@ from pydantic_settings import BaseSettings
 import logging
 from dotenv import load_dotenv
 
+# 启动时先把 .env 文件里的环境变量读进来。
+# 这样本地开发时不需要把所有配置都写进系统环境变量。
 load_dotenv()
 
 # 配置日志
@@ -29,7 +31,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# 获取项目根目录
+# ROOT_DIR 用来把相对配置文件路径转换成仓库内的绝对位置。
 ROOT_DIR = Path(__file__).parent.parent.parent
 
 MOBILE_USE_MCP_NAME = "mobile"
@@ -76,12 +78,12 @@ class Settings(BaseSettings):
 
     app_name: str = "Mobile Agent API"
     app_version: str = "0.1.0"
-    # uvicorn
+    # 这里保存的是 HTTP 服务本身的监听地址，而不是业务接口地址。
     server: ServerConfig = ServerConfig(
         host=os.environ.get("UVICORN_SERVER_HOST", "0.0.0.0"),
         port=int(os.environ.get("UVICORN_SERVER_PORT", 8000)),
     )
-    # 环境配置
+    # env 主要用于区分开发 / 生产等运行环境。
     env: str = os.environ.get("ENV", "production")
     config_path: Optional[str] = Field(default=None, description="配置文件路径")
 
@@ -103,7 +105,12 @@ class Settings(BaseSettings):
         case_sensitive = False
 
     def _replace_env_vars(self, config_data):
-        """递归替换配置中的环境变量占位符 比如${ARK_API_KEY} 变成 环境变量中的值"""
+        """递归替换配置文件中的环境变量占位符。
+
+        例如 TOML 里写 `${ARK_API_KEY}`，
+        加载后会自动替换成当前进程环境变量里的真实值。
+        这样配置文件可以提交模板，而敏感信息仍然放在环境变量里。
+        """
         if isinstance(config_data, dict):
             return {
                 key: self._replace_env_vars(value) for key, value in config_data.items()
@@ -154,7 +161,9 @@ class Settings(BaseSettings):
                 # 新增：替换环境变量
             config_data = self._replace_env_vars(config_data)
 
-            # 更新配置（此处不变）
+            # 这里不是直接把整个 Settings 对象替换掉，
+            # 而是把配置文件里的字段逐个合并到当前实例上。
+            # 这样环境变量中已经给出的默认值仍然可以保留。
             for key, value in config_data.items():
                 if hasattr(self, key):
                     if isinstance(value, dict) and isinstance(
@@ -176,10 +185,14 @@ class Settings(BaseSettings):
         return self
 
 
-# 创建全局设置实例
+# 整个服务通常只需要一份全局 settings，
+# 各模块通过导入它或调用 get_settings() 来共享同一套配置。
 settings = Settings()
 
-# 优先环境变量，其次自动查找 config.json
+# 配置优先级是：
+# 1. `MOBILE_CONFIG_PATH` 指定的文件；
+# 2. 仓库根目录下默认存在的 `config.toml`；
+# 3. 如果都没有，就退回到类里的默认值和环境变量。
 if os.environ.get("MOBILE_CONFIG_PATH"):
     settings.config_path = os.environ.get("MOBILE_CONFIG_PATH")
     settings = settings.load_from_file()
@@ -204,6 +217,8 @@ def get_models() -> Dict[str, LLMConfig]:
 
 
 def get_model_config(model_key: str) -> LLMConfig:
+    # settings 里的条目有可能已经是 LLMConfig，也可能还是原始 dict。
+    # 这里统一转换成 LLMConfig，调用方就能拿到稳定的类型。
     models = get_models()
     if model_key in models:
         config_dict = models[model_key]

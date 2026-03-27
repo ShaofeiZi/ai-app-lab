@@ -40,18 +40,20 @@ const InputArea: React.FC<InputAreaProps> = ({
   const [internalInputText, setInternalInputText] = useState('');
   const [isComposing, setIsComposing] = useState(false);
 
-  // 判断是否为受控组件
+  // 这个组件既支持“自己管理输入值”，也支持“父组件把输入值传进来控制”。
+  // 这就是受控 / 非受控两种模式。
   const isControlled = inputValue !== undefined && onTextChange !== undefined;
 
   // 获取当前输入值
   const currentInputValue = isControlled ? inputValue : internalInputText;
 
-  // 输入框自动聚焦
+  // 页面一打开就把焦点放到输入框，用户可以直接开始输入。
   useEffect(() => {
     inputRef.current?.focus();
   }, [inputRef]);
 
-  // 处理输入变化
+  // 输入变化时一边更新文本，一边根据内容高度自动撑开输入框，
+  // 这样多行任务描述不会把文字挤成一团。
   const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const newValue = e.target.value;
 
@@ -62,34 +64,36 @@ const InputArea: React.FC<InputAreaProps> = ({
     }
 
     if (isControlled) {
-      // 受控模式：调用外部 onChange 回调
+      // 受控模式下，真正的数据源在父组件手里。
       onTextChange(newValue);
     } else {
-      // 非受控模式：更新内部状态
+      // 非受控模式下，这个组件自己保存输入值。
       setInternalInputText(newValue);
     }
   };
 
-  // 处理发送消息
+  // handleSend 只负责“把当前输入交给外部发送逻辑”，
+  // 真正的网络请求和消息追加在父组件里完成。
   const handleSend = () => {
     if (currentInputValue.trim() !== '' && !isCalling) {
       handleSendMessage(currentInputValue);
 
-      // 清空输入框
+      // 发送后立即清空输入框，给用户“这一条已经提交”的清晰反馈。
       if (isControlled) {
         onTextChange('');
       } else {
         setInternalInputText('');
       }
 
-      // 重置输入框高度
+      // 文本清空后，也把输入框高度收回去。
       if (inputRef.current) {
         inputRef.current.style.height = 'auto';
       }
     }
   };
 
-  // 处理按键事件
+  // Enter 发送、Shift+Enter 换行是聊天输入框里很常见的交互规则。
+  // 这里还额外处理了输入法组合状态，避免中文输入过程中误发送。
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     // 如果按下 Enter 键，并且没有同时按下 Shift 键，且不在输入法组合状态
     if (e.key === 'Enter' && !e.shiftKey && !isComposing && !isCalling && currentInputValue.trim() !== '') {

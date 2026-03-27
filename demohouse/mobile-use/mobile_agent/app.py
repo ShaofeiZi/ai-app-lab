@@ -21,14 +21,16 @@ from mobile_agent.config.settings import settings
 from mobile_agent.routers.base import register_routers
 
 
-# 创建FastAPI应用
+# 这里把整个后端服务的“骨架”搭起来：
+# 包括应用对象本身、中间件，以及所有业务路由。
 app = FastAPI(
     title=settings.app_name,
     description="HTTP Server for Mobile Agent",
     version=settings.app_version,
 )
 
-# Enable CORS
+# CORS 允许浏览器里的前端页面跨域访问这个后端接口。
+# Demo 阶段这里放得比较宽松，方便本地开发和嵌入不同宿主环境。
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -37,10 +39,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 添加响应格式中间件
+# 先统一响应格式，再做鉴权。
+# 这样无论业务成功还是失败，前端看到的 JSON 结构都比较稳定。
 app.add_middleware(ResponseMiddleware)
-# 添加账户鉴权中间件
+# 账户鉴权中间件会把账户信息挂到 request.state 上，
+# 后面的路由处理函数就不需要自己重复读请求头了。
 app.add_middleware(AuthMiddleware)
 
-# 注册所有路由
+# 最后集中注册路由，把 session 和 agent 两组接口挂到应用上。
 register_routers(app)

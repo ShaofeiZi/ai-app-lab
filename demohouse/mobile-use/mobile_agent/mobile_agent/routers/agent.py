@@ -43,6 +43,8 @@ async def stream_generator(
     thread_id: str,
 ):
     try:
+        # thread_id 对应的是前端这次云手机会话，
+        # session 里保存了 pod 大小、鉴权信息、chat_thread_id 等后续必需数据。
         session = session_manager.get_thread_state(thread_id)
         async for chunk in agent.run(
             message,
@@ -55,9 +57,13 @@ async def stream_generator(
             phone_height=session.pod_size.height,
         ):
             if session.sse_connection.is_set():
+                # 前端如果主动点了取消，会把 Event 置位。
+                # 这里尽快终止执行，避免已经没人在看时还继续操作真实设备。
                 agent.logger.info("主动取消任务")
                 raise SSEException()
             for message_part in stream_messages(chunk, is_stream, agent.task_id):
+                # 一个 LangGraph chunk 可能会被拆成多条前端 SSE 消息，
+                # 比如 think 片段、工具输入、工具输出等。
                 yield message_part
 
     except langgraph.errors.GraphRecursionError:
@@ -84,6 +90,7 @@ async def stream_generator(
         agent.logger.error(f"run error: {e}")
         raise e
     finally:
+        # 不论生成器怎么结束，都关闭 agent 侧的 MCP 连接。
         await agent.aclose()
 
 
@@ -105,6 +112,7 @@ async def agent_stream(request: Request, body: AgentStreamRequest):
         StreamingResponse: 事件流响应
     """
     try:
+        # 账户 ID 来自中间件，message / thread_id 来自请求体。
         account_id = request.state.account_id
         user_prompt = body.message
         thread_id = body.thread_id
@@ -120,6 +128,8 @@ async def agent_stream(request: Request, body: AgentStreamRequest):
             raise APIException(code=403, message="会话已被清除，请重新开始会话")
 
         session = session_manager.get_thread_state(thread_id)
+        # set_sse_connection 会为这个 thread 准备一份 Event 对象，
+        # 之后取消任务时就靠它来通知执行链路尽快停下。
         session_manager.set_sse_connection(thread_id)
 
         if session.account_id != account_id:
@@ -142,6 +152,8 @@ async def agent_stream(request: Request, body: AgentStreamRequest):
         )
 
         task_id = str(uuid.uuid4())
+        # StreamingResponse 会把生成器里的内容逐段写给浏览器，
+        # 因此前端可以边看 Agent 思考，边看工具执行，不必等整个任务结束。
         return StreamingResponse(
             content=stream_generator(task_id, agent, is_stream, user_prompt, thread_id),
             media_type="text/event-stream",
@@ -185,6 +197,8 @@ async def cancel_agent(request: Request, body: CancelAgentRequest):
         if session.account_id != account_id:
             raise APIException(code=403, message="会话已被清除，请重新开始会话")
 
+    # 取消动作本质上不是“杀掉 Python 进程”，
+    # 而是把对应 thread 的 SSE 断开标记设为 true，让执行链路自愿停下来。
     session_manager.stop_sse_connection(thread_id)
 
     # 返回成功结果，会被中间件包装为 {"result": {"success": true}}

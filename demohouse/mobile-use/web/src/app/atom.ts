@@ -15,7 +15,12 @@ import { VePhoneClient } from "@/lib/vePhone";
 import { SessionResponse } from "@/types";
 import { atom } from "jotai";
 
-// 从 sessionStorage 根据 threadId 读取消息列表的辅助函数
+// 这里把“前端共享状态”集中定义在一起。
+// 可以把 atom 理解成一块全局的小状态仓库，多个组件都能订阅和修改。
+
+// 从 sessionStorage 根据 chatThreadId 读取消息列表。
+// 之所以不用 threadId，而用 chatThreadId，
+// 是因为 reset 会保留外层 threadId，但会切换到新的对话上下文。
 export const getMessagesFromStorage = (chatThreadId?: string): Message[] => {
   if (typeof window === 'undefined' || !chatThreadId) return [];
   try {
@@ -27,7 +32,8 @@ export const getMessagesFromStorage = (chatThreadId?: string): Message[] => {
   }
 };
 
-// 保存消息列表到 sessionStorage 的辅助函数
+// 每次消息列表更新后都可以把它持久化到 sessionStorage，
+// 这样刷新页面时还能把历史对话恢复出来。
 export const saveMessagesToStorage = (messages: Message[], chatThreadId?: string): void => {
   if (typeof window === 'undefined' || !chatThreadId) return;
   try {
@@ -38,20 +44,22 @@ export const saveMessagesToStorage = (messages: Message[], chatThreadId?: string
   }
 };
 
-// Pod ID 原子状态
+// 当前正在展示的云手机 pod ID。
 export const PodIdAtom = atom<string | undefined>(undefined);
 export const VePhoneAtom = atom<VePhoneClient>(
   new VePhoneClient()
 );
 
+// 浏览器侧的 CloudAgent 客户端实例，负责发请求和接收 SSE。
 export const cloudAgentAtom = atom<CloudAgent | null>(null);
 
-// 消息列表原子状态 - 简单版本
+// 当前聊天页面上渲染的消息数组。
 export const MessageListAtom = atom<Message[]>([]);
 
 export const initMessageStatusAtom = atom<boolean>(false)
 
-// 用于手动初始化消息列表的 effect atom
+// 这是一个“带副作用的 atom”：
+// 调用它时会从存储里读出历史消息，并同步到 MessageListAtom。
 export const initMessageListAtom = atom(
   null,
   (get, set) => {
@@ -61,12 +69,12 @@ export const initMessageListAtom = atom(
     if (chatThreadId) {
       const storedMessages = getMessagesFromStorage(chatThreadId);
       set(MessageListAtom, storedMessages);
-      set(initMessageStatusAtom, true) // 设置初始化完成，用于页面组件渲染问题
+      set(initMessageStatusAtom, true) // 标记初始化结束，避免页面在未知状态下过早渲染
     }
   }
 );
 
-// 用于保存消息到 sessionStorage 的 effect atom
+// 与上面的 initMessageListAtom 相反，这个 atom 负责把内存里的消息写回存储。
 export const saveMessageListAtom = atom(
   null,
   (get, set) => {
@@ -80,9 +88,9 @@ export const saveMessageListAtom = atom(
 
 
 export const TimeoutStateAtom = atom<'active' | 'experienceTimeout'>('active');
-// 倒计时时间（秒）
+// 倒计时时间（秒）。云手机体验通常是限时的，所以前端需要一直展示剩余时间。
 export const CountdownAtom = atom<number>(30 * 60); // 30分钟
-// 会话开始时间
+// 记录倒计时从什么时候开始，便于 UI 做进一步展示或调试。
 export const StartTimeAtom = atom<number | null>(null);
-// 会话数据原子状态
+// 后端返回的当前会话详情，例如 pod token、分辨率、有效期等。
 export const SessionDataAtom = atom<SessionResponse | null>(null);

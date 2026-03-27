@@ -15,6 +15,13 @@ import re
 
 
 class StreamPipeMessage(BaseModel):
+    """
+    保存某一条流式输出在解析过程中的中间状态。
+
+    由于模型返回的是一小段一小段的 delta，而不是一次性完整文本，
+    我们需要把已经收到的内容先暂存起来，等格式足够完整时再拆出 summary 和 action。
+    """
+
     id: str
     content: str
     summary: str
@@ -24,14 +31,24 @@ class StreamPipeMessage(BaseModel):
 
 
 class StreamPipe:
-    # Summary: 总结
-    # Action:
+    """
+    把模型的流式文本解析成“总结 + 动作”的辅助类。
+
+    当前系统要求模型按下面的格式输出：
+    Summary: ...
+    Action: ...
+
+    但流式场景下，关键字本身也可能被拆开，所以这里要做的是“增量解析”，
+    而不是简单地等全部返回后再一次性 split。
+    """
+
     pipes: Dict[str, StreamPipeMessage]
 
     def __init__(self):
         self.pipes = {}
 
     def create(self, id: str):
+        # 为一条新的流式输出创建缓冲区。
         self.pipes[id] = StreamPipeMessage(
             id=id,
             content="",
@@ -42,21 +59,18 @@ class StreamPipe:
         )
 
     def pipe(self, id: str, delta: str):
+        # 每收到一个新的文本碎片，就先拼接到完整 content 上。
         chat_data = self.pipes[id]
         chat_data.content += delta
-        # delta
+        # 下面这些状态示例说明了为什么这里不能偷懒：
         # 1. Summ
-        # 2. mary:
-        # 3. 现在我们
-        # 4. bac
-        # content 有下面这几种情况:
-        # 1. Summ                                            (Summary 关键词正在生成中)
-        # 2. Summary:                                        (Summary 关键词已完成但内容为空)
-        # 3. Summary: 现在我们需要点击抖音图标                  (Summary 内容部分生成)
-        # 4. Summary: 现在我们需要点击抖音图标\n               (Summary 内容已完成，带换行符)
-        # 5. Summary: 现在我们需要点击抖音图标\nActi           (Action 关键词正在生成中)
-        # 6. Summary: 现在我们需要点击抖音图标\nAction: ba     (Action 内容部分生成)
-        # 7. Summary: 现在我们需要点击抖音图标\nAction: press_back() (Action 内容已完成)
+        # 2. Summary:
+        # 3. Summary: 现在我们需要点击抖音图标
+        # 4. Summary: 现在我们需要点击抖音图标\n
+        # 5. Summary: 现在我们需要点击抖音图标\nActi
+        # 6. Summary: 现在我们需要点击抖音图标\nAction: ba
+        # 7. Summary: 现在我们需要点击抖音图标\nAction: press_back()
+        # 也就是说，Summary 和 Action 可能同时处在“半截生成中”的状态。
 
         # 检查是否可能是 Action 关键词正在生成中
         is_action_keyword_partial = False
@@ -70,7 +84,7 @@ class StreamPipe:
             ) and not last_line.startswith("Action:"):
                 is_action_keyword_partial = True
 
-        # 检查是否是 Summary 部分的内容
+        # 只要已经出现 Summary:，就尝试提取当前可以确认的 summary 内容。
         if "Summary:" in chat_data.content:
             current_summary = ""
             summary_text = chat_data.content.split("Summary:")[1]
@@ -92,37 +106,35 @@ class StreamPipe:
 
             current_summary = summary_text.strip()
 
-            # 如果有 Summary 内容的更新，且有回调函数，则调用回调
+            # 这里返回的是“新增部分”而不是完整 summary，
+            # 方便前端做流式追加渲染。
             if len(current_summary) > chat_data.last_summary_length:
-                # 计算新增的 delta 部分
                 summary_delta = current_summary[chat_data.last_summary_length :]
-                # 检查新增部分是否包含 \n 后面跟着 A、Ac、Act 等（Action关键词的开始部分）
+                # 如果新增片段里已经混入了下一行 Action 的开头，就把那部分裁掉。
                 if "\n" in summary_delta:
-                    # 如果有换行，只保留换行符前面的部分
-                    # :\nAction
                     parts = summary_delta.split("\n", 1)
-                    summary_delta = parts[0]  # 只保留第一部分，去除换行符及后面内容
+                    summary_delta = parts[0]
                 chat_data.last_summary_length = len(current_summary)
                 return id, summary_delta
 
-            # 更新 summary 字段（如果尚未收集完成）
+            # 如果 summary 还没正式结束，就持续刷新它的当前值。
             if not chat_data.summary_collected:
                 chat_data.summary = current_summary
-                # 如果发现有 \n 或 \nAction，则标记为收集完成
+                # 一旦检测到换行结束，就认为 summary 已经收集完成。
                 if (delta == "\n" and len(summary_text.strip()) > 0) or (
                     len(summary_text) > 0 and summary_text[-1] == "\n"
                 ):
                     chat_data.summary_collected = True
 
-        # 不管 summary 是否已收集，都要检查 Action
+        # Action 的提取不依赖 summary 是否完整结束，只要关键字出现就先记下来。
         if "Action:" in chat_data.content:
-            # 提取 Action 部分
             action_text = chat_data.content.split("Action:")[1].strip()
             chat_data.tool_call = action_text
 
     def complete(self, id: str):
+        # 在一轮流式输出结束后，产出完整解析结果。
         if id not in self.pipes:
-            # 如果找不到对应的pipe，返回重试
+            # 找不到缓冲区说明上下文已经不一致，统一走错误动作分支。
             return self.error_action()
 
         chat_data = self.pipes[id].model_dump()
@@ -131,8 +143,7 @@ class StreamPipe:
         summary = chat_data.get("summary", "")
         tool_call = chat_data.get("tool_call", "")
 
-
-        # 如果summary 或 tool_call为空，返回重试
+        # summary 或 tool_call 缺失都说明格式不完整，不能进入正常执行。
         if not summary or not tool_call:
             return self.error_action(id)
 
@@ -140,6 +151,8 @@ class StreamPipe:
         return content, summary, tool_call
 
     def error_action(self, id: Optional[str] = None) -> tuple[str, str, str]:
+        # 这里不直接抛异常，而是返回一个约定好的 error_action，
+        # 让上层可以把“解析失败”也当成一种普通动作处理。
         if id and id in self.pipes:
             content = self.pipes[id].content
             self.pipes.pop(id, None)

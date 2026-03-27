@@ -28,6 +28,8 @@ class MobileUseAgent:
     name = "mobile_use"
 
     def __init__(self):
+        # 这里初始化的是“不会跟某一次任务绑定”的长期成员：
+        # 例如提示词、日志器、MCP 连接管理器、云手机客户端和成本统计器。
         self.prompt = doubao_system_prompt
         self.logger = AgentLogger(__name__)
 
@@ -49,9 +51,12 @@ class MobileUseAgent:
         tos_region: str,
         tos_endpoint: str,
     ):
-        """异步初始化方法，子类可以覆盖此方法进行异步初始化
+        """为某一次具体任务补齐运行时依赖。
 
-        该方法默认返回self，允许链式调用
+        这里和 __init__ 的区别是：
+        __init__ 只准备“通用能力”，
+        initialize 才把具体 pod、鉴权 token、TOS 配置绑定到当前 agent 实例上。
+        这样同一个类可以用于不同云手机会话，而不是把所有外部资源写死。
         """
         self.logger.set_context(pod_id=pod_id)
         await self.mobile_client.initialize(
@@ -62,11 +67,15 @@ class MobileUseAgent:
             tos_endpoint=tos_endpoint,
             auth_token=auth_token,
         )
+        # 工具列表来自 MCP 服务。
+        # 也就是说，后面模型决定“点哪里、滑哪里、输入什么”，
+        # 最终都会落到这里加载出来的工具集合上。
         self.tools = await Tools.from_mcp(self.mcp_hub)
 
         return self
 
     async def aclose(self) -> None:
+        # 任务结束后关闭 MCP 连接，避免长时间挂着无用连接。
         await self.mcp_hub.aclose()
 
     async def run(
@@ -81,6 +90,8 @@ class MobileUseAgent:
         phone_height: int,
     ):
         try:
+            # 一个 thread_id 对应一次 LangGraph 执行上下文。
+            # 这里先把和本次任务强相关的字段写到实例或初始状态里，后面每个图节点都会依赖这些信息。
             self.logger.set_context(thread_id=session_id, chat_thread_id=thread_id)
             self.task_id = task_id
             self.stream = is_stream
@@ -93,6 +104,9 @@ class MobileUseAgent:
                 "max_iterations": self.max_steps,
                 "step_interval": self.step_interval,
             }
+            # LangGraph 的 state 适合放“可序列化、可追踪”的轻量数据，
+            # 但像 mobile_client、tools、action_parser 这种复杂对象不适合反复塞进 state。
+            # 所以这里交给 agent_object_manager，用 thread_id 做索引集中保管。
             agent_object_manager.create_context(
                 thread_id=thread_id,
                 mobile_client=self.mobile_client,
@@ -110,6 +124,9 @@ class MobileUseAgent:
                 "recursion_limit": self.max_steps * 3,
             }
 
+            # graph.astream 会持续产出 LangGraph 的流式事件。
+            # 当前函数不自己“消费”这些事件，而是继续 yield 给上层路由，
+            # 这样 HTTP SSE 响应就能把每一步思考和工具执行过程实时推给前端。
             async for chunk in graph.astream(
                 input=initial_state,
                 config=config,
@@ -121,4 +138,6 @@ class MobileUseAgent:
                 self.logger.info("stream mode, not support cost calculator")
             else:
                 self.cost_calculator.print_cost()
+            # 不管任务是成功、失败还是被取消，最后都要清掉 thread 上下文，
+            # 否则旧任务残留对象会污染后续会话，甚至造成内存泄漏。
             agent_object_manager.destroy_context(thread_id)

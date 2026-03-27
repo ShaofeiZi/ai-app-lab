@@ -24,8 +24,8 @@ def register_routers(app: FastAPI):
     Args:
         app: FastAPI应用实例
     """
-    # 注册聊天相关路由
+    # session 路由负责“先准备好云手机会话”。
     app.include_router(session.router)
 
-    # 注册智能代理相关路由
+    # agent 路由负责“真正执行任务并把过程流式推给前端”。
     app.include_router(agent.router)
