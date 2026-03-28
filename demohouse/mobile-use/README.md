@@ -17,39 +17,44 @@ Currently, Mobile Use has been officially launched on [veFaaS Application Center
 
 - **AI-Powered Automation**: Accurately identify, understand and click on mobile applications and complex scenarios based on Doubao visual large model
 - **Cloud Phone Integration**: Execute automated tasks in a secure, stable and low-latency Cloud Phone isolated environment
-- **MCP Protocol Support**: Standard Model Context Protocol (MCP) Tool: [Mobile Use MCP](https://github.com/volcengine/mcp-server/tree/main/server/mcp_server_mobile_use)
+- **Skill-based Backend**: The default backend is now a skill-driven agent plus an independent mobile execution service, while the legacy MCP stack remains available for fallback debugging.
 - **Web Interface**: Modern React/Next.js web interface for interaction and monitoring
 - **Real-time Streaming**: SSE-based real-time communication and feedback
 - **Extensible Architecture**: Modular design for easy extension and intregration into actual business flow
 
 ## 🏗️ Architecture
 
-The project consists of three main components:
+The project now consists of three default components, with the legacy MCP stack kept as an optional compatibility path:
 
 ```
 mobile-use/
-├── mobile_agent/      # Python AI Agent Core
-├── mobile_use_mcp/    # Go MCP Server
-└── web/              # Next.js Web Frontend
+├── mobile_use_service/   # Mobile execution service
+├── mobile_agent_skill/   # Skill-driven Python agent
+├── web/                  # Next.js Web frontend
+├── mobile_agent/         # Legacy Python agent (optional fallback)
+└── mobile_use_mcp/       # Legacy Go MCP server (optional fallback)
 ```
 
 ### Core Components
 
-1. **Mobile Agent** (Python)
+1. **Mobile Use Service** (Python)
+   - Cloud phone interaction layer
+   - Mobile automation tools and APIs
+   - Screenshot, tap, swipe, input, app-management and other execution abilities
+
+2. **Skill Agent** (Python)
    - AI reasoning and decision making
    - Vision model integration
-   - Task orchestration and execution
-   - Memory and context management
-
-2. **MCP Server** (Go)
-   - Cloud phone interaction layer
-   - Standard MCP protocol implementation
-   - Mobile automation tools and APIs
+   - Static skill registry and policy control extension points
+   - Task orchestration and SSE streaming output
 
 3. **Web Frontend** (Next.js)
    - User interface and interaction
    - Real-time monitoring and feedback
    - Task management and visualization
+
+4. **Legacy MCP Stack** (Optional)
+   - `mobile_agent/` and `mobile_use_mcp/` are kept only for compatibility or fallback debugging
 
 ## 🛠️ Available Tools
 
@@ -73,9 +78,9 @@ mobile-use/
 
 - **Node.js** >= 20 (use [nvm](https://github.com/nvm-sh/nvm) for version management) 
 - **Python** >= 3.11 (use [uv](https://docs.astral.sh/uv/) for dependency management)
-- **Go** >= 1.23 (for MCP server) [install](https://go.dev/doc/install)
+- **Go** >= 1.23 (only needed when you explicitly enable the legacy MCP server) [install](https://go.dev/doc/install)
 > [!NOTE]
-> mobile_use_mcp currently only supports Linux systems build
+> `mobile_use_mcp` is no longer part of the default startup path. It is only required when `START_LEGACY_STACK=1` is used.
 
 
 ### Installation
@@ -95,15 +100,13 @@ sh setup.sh
 3. **Configure environment**
 ```bash
 # Copy and edit configuration files
-cp mobile_agent/.env.example mobile_agent/.env
+cp mobile_agent_skill/.env.example mobile_agent_skill/.env
 cp web/.env.example web/.env
 # Edit configuration with your API keys and endpoints
 ```
 
-### agent config
+### skill agent config
 ```bash
-MOBILE_USE_MCP_URL= # MCP_SSE service URL http://xxxx.com/mcp, local url is http://localhost:8888/mcp
-
 TOS_BUCKET= # Volcengine Object Storage bucket
 TOS_REGION= # Volcengine Object Storage region
 TOS_ENDPOINT= # Volcengine Object Storage endpoint
@@ -116,35 +119,35 @@ ACEP_SK= # Volcengine cloud phone SK
 ACEP_ACCOUNT_ID= # Volcengine accountID
 ```
 
+`mobile_agent_skill/.env.example` still contains `MOBILE_USE_MCP_URL` for legacy compatibility, but the default skill-driven path does not depend on the legacy MCP server.
+
 ### web config
 
 ```bash
-CLOUD_AGENT_BASE_URL= # agent service URL http://xxxx.com/mobile-use/
+CLOUD_AGENT_BASE_URL= # backend service URL, e.g. http://localhost:8002/mobile-use/
 ```
 
 4. **Start services**
 
-Start MCP server:
+Start the default stack:
 ```bash
-cd mobile_use_mcp
-go run cmd/mobile_use_mcp/main.go  -t sse -p 8888
+./start.sh
 ```
 
-Start the mobile agent service:
+This starts:
+- `mobile_use_service` on `8001`
+- `mobile_agent_skill` on `8002`
+- `web` on `8080`
+
+If you need the legacy MCP stack for fallback debugging, start it explicitly:
 ```bash
-cd mobile_agent
-uv venv
-source .venv/bin/activate
-uv pip install -e .
-uv run main.py
+START_LEGACY_STACK=1 ./start.sh
 ```
 
-Start web frontend:
+The matching shutdown command is:
 ```bash
-cd web
-npm run dev
+./stop.sh
 ```
-
 
 5. **Access the application**
 

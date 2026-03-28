@@ -14,40 +14,41 @@
 
 - **AI 驱动的移动自动化**：依赖视觉大模型识别页面内容、理解操作目标，并输出可执行的移动端动作。
 - **云手机运行环境**：自动化流程运行在隔离的云手机环境中，适合需要稳定性、并发性和环境一致性的场景。
-- **MCP 协议接入**：提供兼容标准 MCP 的工具层，便于与 Agent 框架、编排平台或自定义工具系统对接。
+- **Skill 驱动后端**：默认后端已切换为“Skill Agent + 独立移动执行 service”的方案，旧版 MCP 链路仅保留用于兼容排查或回退。
 - **Web 可视化界面**：前端提供任务输入、流式反馈和实时监控能力，方便调试和展示。
 - **流式结果输出**：依赖 SSE 将中间思考、工具调用和任务进度逐步返回给前端。
-- **模块化架构**：Agent、MCP Server 和 Web Frontend 分层清晰，适合分别替换或扩展。
+- **模块化架构**：移动执行 service、Skill Agent 与 Web Frontend 分层清晰，旧版 MCP 链路也仍可独立保留作为兼容路径。
 
 ## 🏗️ 架构组成
 
-仓库由三个主要模块构成：
+仓库当前默认由三个主要模块构成，同时保留旧版 MCP 架构作为可选兼容链路：
 
 ```text
 mobile-use/
-├── mobile_agent/      # Python 编写的 Agent 核心服务
-├── mobile_use_mcp/    # Go 编写的 MCP Server
-└── web/               # Next.js 编写的 Web 前端
+├── mobile_use_service/   # 独立移动执行 service
+├── mobile_agent_skill/   # 基于 Skill 的 Python Agent
+├── web/                  # Next.js 编写的 Web 前端
+├── mobile_agent/         # 旧版 Python Agent（可选回退）
+└── mobile_use_mcp/       # 旧版 Go MCP Server（可选回退）
 ```
 
-### 1. Mobile Agent
+### 1. Mobile Use Service
 
-`mobile_agent/` 负责 AI 推理与任务执行主流程，包括：
+`mobile_use_service/` 负责和云手机实际交互的执行能力，包括：
+
+- 接收并执行点击、滑动、输入、截图、应用管理等移动端动作
+- 对接火山引擎云手机底层能力
+- 为上层 Agent 提供稳定、独立的 HTTP 能力层
+
+### 2. Skill Agent
+
+`mobile_agent_skill/` 负责 AI 推理与任务执行主流程，包括：
 
 - 维护对话上下文和任务状态
 - 将截图与用户输入组织为模型上下文
 - 调用视觉模型产出动作决策
-- 调度 MCP 工具执行实际移动端操作
+- 通过本地静态注册的 Skill 调用 `mobile_use_service`
 - 将思考过程、工具输入输出以 SSE 形式回传
-
-### 2. MCP Server
-
-`mobile_use_mcp/` 是移动操作能力的协议适配层，主要职责包括：
-
-- 提供标准化的移动端工具接口
-- 对接火山引擎云手机能力
-- 暴露 `sse`、`streamable-http`、`stdio` 等传输模式
-- 将底层设备动作包装为可被 Agent 调用的 MCP Tool
 
 ### 3. Web Frontend
 
@@ -57,6 +58,10 @@ mobile-use/
 - 展示 Agent 的思考和执行过程
 - 管理会话、实时流和结果呈现
 - 作为演示或业务接入时的基础控制台
+
+### 4. 旧版 MCP 链路（可选）
+
+`mobile_agent/` 与 `mobile_use_mcp/` 仍保留在仓库中，但默认不会通过 `start.sh` 启动，仅在兼容排查或回退时按需启用。
 
 ## 🛠️ 可用工具
 
@@ -76,7 +81,7 @@ mobile-use/
 | `close_app` | 关闭应用 |
 | `list_apps` | 列出已安装应用 |
 
-这些工具由 MCP Server 提供，Agent 只是决定何时、以什么参数调用它们。
+这些工具现在默认由 `mobile_use_service` 提供，`mobile_agent_skill` 负责决定何时、以什么参数调用它们。
 
 ## 🚦 快速开始
 
@@ -89,10 +94,10 @@ mobile-use/
 - **Python** >= 3.11
   建议使用 [uv](https://docs.astral.sh/uv/) 管理虚拟环境和依赖。
 - **Go** >= 1.23
-  用于构建和运行 `mobile_use_mcp`。
+  仅当你需要显式启用旧版 `mobile_use_mcp` 链路时才需要。
 
 > [!NOTE]
-> `mobile_use_mcp` 当前只支持在 Linux 系统上构建。若你的开发机不是 Linux，通常需要在兼容环境、容器或 CI 中完成该模块的构建。
+> `mobile_use_mcp` 已不再属于默认启动路径。只有在你使用 `START_LEGACY_STACK=1` 启用旧版链路时，才需要处理它的构建与运行。
 
 ### 安装步骤
 
@@ -115,18 +120,16 @@ sh setup.sh
 
 ```bash
 # Copy and edit configuration files
-cp mobile_agent/.env.example mobile_agent/.env
+cp mobile_agent_skill/.env.example mobile_agent_skill/.env
 cp web/.env.example web/.env
 # Edit configuration with your API keys and endpoints
 ```
 
 执行完成后，需要根据你的环境补齐 API Key、服务地址和云资源配置。
 
-### Agent 配置
+### Skill Agent 配置
 
 ```bash
-MOBILE_USE_MCP_URL= # MCP_SSE 服务地址，例如 http://xxxx.com/mcp；本地通常为 http://localhost:8888/mcp
-
 TOS_BUCKET= # 火山引擎对象存储 Bucket
 TOS_REGION= # 火山引擎对象存储 Region
 TOS_ENDPOINT= # 火山引擎对象存储 Endpoint
@@ -139,40 +142,41 @@ ACEP_SK= # 火山引擎云手机 SK
 ACEP_ACCOUNT_ID= # 火山引擎账号 ID
 ```
 
+`mobile_agent_skill/.env.example` 中仍保留了 `MOBILE_USE_MCP_URL` 字段，用于兼容旧版链路；但默认 Skill Agent 方案并不依赖旧版 MCP Server。
+
 这些配置决定 Agent 是否能够正确访问视觉模型、对象存储和云手机底层能力。
 
 ### Web 配置
 
 ```bash
-CLOUD_AGENT_BASE_URL= # Agent 服务地址，例如 http://xxxx.com/mobile-use/
+CLOUD_AGENT_BASE_URL= # 后端服务地址，例如 http://localhost:8002/mobile-use/
 ```
 
 前端通过该地址访问后端 Agent API，因此它必须指向一个可被浏览器访问到的服务入口。
 
 4. **启动服务**
 
-先启动 MCP Server：
+直接启动默认新版链路：
 
 ```bash
-cd mobile_use_mcp
-go run cmd/mobile_use_mcp/main.go -t sse -p 8888
+./start.sh
 ```
 
-然后启动 Agent 服务：
+默认会启动：
+- `mobile_use_service`：`8001`
+- `mobile_agent_skill`：`8002`
+- `web`：`8080`
+
+如果你需要显式启用旧版 MCP/Agent 兼容链路，请使用：
 
 ```bash
-cd mobile_agent
-uv venv
-source .venv/bin/activate
-uv pip install -e .
-uv run main.py
+START_LEGACY_STACK=1 ./start.sh
 ```
 
-最后启动 Web 前端：
+停止服务：
 
 ```bash
-cd web
-npm run dev
+./stop.sh
 ```
 
 5. **访问页面**
@@ -187,15 +191,33 @@ http://localhost:8080?token=123
 
 ## 📌 使用建议
 
-- 如果你只是想理解整体方案，优先阅读根目录 README 与 `mobile_use_mcp/README_en.md`。
-- 如果你准备改造 Agent 推理流程，应重点查看 `mobile_agent/`。
+- 如果你只是想理解当前默认方案，优先阅读根目录 README 与 `MIGRATION.md`。
+- 如果你准备改造新版推理流程，应重点查看 `mobile_agent_skill/`。
 - 如果你准备接入自己的 UI 或演示页面，应重点查看 `web/`。
-- 如果你准备增加新的移动端操作能力，应从 `mobile_use_mcp/` 中新增或扩展工具。
+- 如果你准备增加新的移动端操作能力，应从 `mobile_use_service/` 中新增或扩展执行能力。
 
 ## 🔗 相关目录
 
-- `mobile_agent/`：Agent 运行时与任务编排逻辑
-- `mobile_use_mcp/`：云手机 MCP 能力封装
+- `mobile_agent_skill/`：新版 Skill Agent 运行时与任务编排逻辑
+- `mobile_use_service/`：新版移动执行能力封装
+- `mobile_agent/`：旧版 Agent 运行时（兼容）
+- `mobile_use_mcp/`：旧版云手机 MCP 能力封装（兼容）
 - `web/`：交互式前端页面
 
-如果你要做二次开发，建议先分别进入这三个目录阅读对应 README，再决定从哪个模块切入。
+如果你要做二次开发，建议优先从 `mobile_agent_skill/`、`mobile_use_service/` 和 `web/` 三个目录切入；旧版目录仅在兼容需求下再看。
+
+## 新旧后端切换
+
+本项目目前支持两套后端运行，但默认启动的是新版：
+- **新版 Skill Agent（默认启动，8002 端口）**：基于静态 Skill 注册和独立 service 执行的代理。
+- **旧版 Agent（可选回退，8000 端口）**：基于动态 MCP 工具的代理，仅在 `START_LEGACY_STACK=1` 时通过 `start.sh` 一并启动。
+
+要切换 Web 前端请求的后端目标，请在 `web/.env` 文件中修改 `CLOUD_AGENT_BASE_URL`：
+
+```env
+# 使用新版 Skill Agent
+CLOUD_AGENT_BASE_URL=http://localhost:8002/mobile-use/
+
+# 如果需要回退到旧版 Agent，请改回：
+# CLOUD_AGENT_BASE_URL=http://localhost:8000/mobile-use/
+```

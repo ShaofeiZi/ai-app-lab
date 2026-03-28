@@ -1,0 +1,119 @@
+# Copyright (c) 2025 Bytedance Ltd. and/or its affiliates
+# Licensed under the 【火山方舟】原型应用软件自用许可协议
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at 
+#     https://www.volcengine.com/docs/82379/1433703
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+import json
+
+from mobile_agent.config.settings import MOBILE_USE_MCP_NAME
+from mobile_agent.agent.tools.tool.mcp_tool import McpTool
+from mobile_agent.agent.tools.tool.skill_tool import SkillTool
+from mobile_agent.agent.skills.registry import SkillRegistry
+from mobile_agent.agent.skills.executor import SkillExecutor
+from mobile_agent.agent.infra.model import ToolCall
+from mobile_agent.agent.tools.tool import (
+    FinishedTool,
+    WaitTool,
+    CallUserTool,
+    ErrorTool,
+)
+from mobile_agent.agent.tools.mcp import MCPHub
+from mobile_agent.agent.tools.tool.abc import Tool, SpecialTool
+
+
+class Tools:
+    def __init__(
+        self,
+        tools: list[Tool | SpecialTool | McpTool | SkillTool],
+    ):
+        self.tools = tools
+
+    @classmethod
+    async def from_skill_registry(cls, registry: SkillRegistry = None, executor: SkillExecutor = None, context: dict = None):
+        if registry is None:
+            registry = SkillRegistry()
+        
+        tools = [
+            FinishedTool(),
+            WaitTool(),
+            CallUserTool(),
+            ErrorTool(),
+            *list(
+                map(
+                    lambda skill: SkillTool(skill, executor, context),
+                    registry.list_all(),
+                )
+            ),
+        ]
+        return cls(tools)
+
+    @classmethod
+    async def from_mcp(cls, mcp_hub: MCPHub):
+        # 这里把两类工具合并到一起：
+        # 1. 本地定义的特殊工具，例如 finished / wait / call_user / error
+        # 2. 从 MCP server 动态拉取的真实手机操作工具
+        tools = [
+            FinishedTool(),
+            WaitTool(),
+            CallUserTool(),
+            ErrorTool(),
+            *list(
+                map(
+                    lambda tool: McpTool(mcp_hub, MOBILE_USE_MCP_NAME, tool),
+                    await mcp_hub.get_tools(MOBILE_USE_MCP_NAME),
+                )
+            ),
+        ]
+        return cls(tools)
+
+    def prompt_tools(self):
+        # 返回完整工具对象列表，适合上层继续做自定义处理。
+        return list(map(lambda tool: tool, self.tools))
+
+    def list_tools_schema_for_openai(self):
+        # 这里输出的是 OpenAI function/tool calling 所需的 schema 格式。
+        tools = list(map(lambda tool: tool.get_tool_schema_for_openai(), self.tools))
+        return tools
+
+    def list_tools_prompt_string(self):
+        # 这类字符串通常用于把工具说明拼进 prompt，告诉模型“有哪些能力可以调用”。
+        tools = list(map(lambda tool: tool.get_prompt_string(), self.tools))
+        return tools
+
+    async def exec(self, tool_call: ToolCall):
+        # 先按名字找到工具对象，再把 arguments 交给它执行。
+        tool = self.get_tool_by_name(tool_call["name"])
+        if tool:
+            content = await tool.call(tool_call["arguments"])
+            return content
+        else:
+            raise ValueError(f"Tool with name {tool_call['name']} not found")
+
+    def is_special_tool(self, tool_name: str):
+        # “特殊工具”指的是不需要走通用 MCP 执行路径、而是由 agent 自己特殊处理的工具。
+        tool = self.get_tool_by_name(tool_name)
+        return tool and tool.is_special_tool
+
+    def get_special_message(self, tool_name: str, content: str, args: dict):
+        tool = self.get_tool_by_name(tool_name)
+        if tool and tool.is_special_tool:
+            return tool.special_message(content, args)
+        else:
+            return None
+
+    def get_special_memory(self, tool_name: str):
+        tool = self.get_tool_by_name(tool_name)
+        if tool and tool.is_special_tool:
+            return tool.special_memory()
+        else:
+            return None
+
+    def get_tool_by_name(self, tool_name: str) -> Tool | SpecialTool | McpTool | None:
+        # 工具列表规模不大，这里直接线性查找即可，代码也更直观。
+        return next((tool for tool in self.tools if tool.name == tool_name), None)

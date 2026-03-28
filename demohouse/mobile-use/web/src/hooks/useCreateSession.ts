@@ -52,6 +52,7 @@ const useCreateSessionAPI = () => {
       setSessionData(data);
       changeAgentChatThreadId(data.chat_thread_id);
 
+      // 返回完整响应给调用方，方便页面继续初始化云手机组件。
       return data;
     }
 

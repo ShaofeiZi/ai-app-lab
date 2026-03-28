@@ -27,6 +27,7 @@ const _post: ApiHandler = async (request: Request, middlewareResult) => {
   const pod_id = body.pod_id ?? body.podId;
   // withUserInfo: true 表示把中间件里解析出来的用户信息一并带给下游，
   // 这样后端可以把 accountId/userId/name 回写到响应里。
+  // 这一步做完后，浏览器拿到的就是“可直接初始化云手机”的完整 session 数据。
   const response = await fetchServer(
     target,
     middlewareResult,

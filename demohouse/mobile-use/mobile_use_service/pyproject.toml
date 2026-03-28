@@ -1,0 +1,23 @@
+[project]
+name = "mobile-use-service"
+version = "0.1.0"
+description = "Mobile Use Service"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi",
+    "uvicorn",
+    "pydantic",
+    "pydantic-settings",
+    "requests",
+    "httpx"
+]
+
+[tool.pytest.ini_options]
+minversion = "6.0"
+addopts = "-ra -q"
+testpaths = [
+    "tests",
+]
+pythonpath = [
+  "."
+]

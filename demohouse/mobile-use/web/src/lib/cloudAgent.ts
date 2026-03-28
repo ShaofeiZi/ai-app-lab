@@ -164,6 +164,7 @@ class CloudAgent {
 
           try {
             if (typeof line === 'string' && line.startsWith('data: ')) {
+              // 每一段 `data: ...` 都代表一条完整 SSE 消息。
               this._onMessage(line as `data: ${string}`);
             }
           } catch (error) {

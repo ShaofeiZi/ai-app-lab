@@ -145,6 +145,8 @@ function ChatPageContent() {
       }
     };
 
+    // 注意：这里依赖的是 cloudAgent 和 sessionData。
+    // 也就是说，只要会话对象恢复完成，页面就会自动继续初始化云手机，而不需要用户手动刷新第二次。
     setupSession();
   }, [cloudAgent, router, sessionData, searchParams]);
 

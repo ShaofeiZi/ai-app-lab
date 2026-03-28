@@ -1,3 +1,13 @@
 .DS_Store
 /logs/
 /build
+/.run/
+mobile_agent_skill/.venv/
+mobile_agent_skill/.pytest_cache/
+mobile_agent_skill/**/__pycache__/
+mobile_use_service/.venv/
+mobile_use_service/.pytest_cache/
+mobile_use_service/**/__pycache__/
+**/.pytest_cache/
+**/__pycache__/
+**/*.egg-info/
