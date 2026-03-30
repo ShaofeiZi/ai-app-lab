@@ -196,12 +196,7 @@ function ChatPageContent() {
                   </div>
                   <div className="p-6 flex flex-col items-center justify-center flex-auto overflow-hidden">
                     <Phone />
-                    <p className="max-w-[360px] text-xs text-gray-500 text-center mt-4 flex-0 whitespace-nowrap">
-                      {/* 这里明确告诉体验用户：右侧画面是只读展示，不允许直接点击操作。 */}
-                      因安全合规原因，体验页面已禁止与云手机实例点击交互
-                      <br />
-                      请知悉由于Demo应用白名单限制，部分应用会安装失败
-                    </p>
+               
                   </div>
                 </div>
               </div>
